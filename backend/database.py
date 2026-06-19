@@ -228,6 +228,86 @@ class WaitlistLog(Base):
     result_booking = relationship("Booking")
 
 
+class DrillScript(Base):
+    __tablename__ = "drill_scripts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(200), nullable=False, unique=True, index=True)
+    description = Column(Text, default="")
+    version = Column(String(50), default="1.0")
+
+    venue_rules = Column(Text, default="{}")
+    drill_samples = Column(Text, default="[]")
+    member_accounts = Column(Text, default="[]")
+    checkpoints = Column(Text, default="[]")
+    cleanup_strategy = Column(Text, default="{}")
+
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    creator = relationship("User", foreign_keys=[created_by])
+
+
+class DrillBatch(Base):
+    __tablename__ = "drill_batches"
+
+    id = Column(Integer, primary_key=True, index=True)
+    batch_id = Column(String(100), unique=True, nullable=False, index=True)
+    script_id = Column(Integer, ForeignKey("drill_scripts.id"), nullable=False)
+    script_name = Column(String(200), default="")
+    script_snapshot = Column(Text, default="{}")
+
+    status = Column(String(30), default="pending")
+    # pending: 待执行, running: 执行中, completed: 已完成,
+    # failed: 失败, rolled_back: 已回滚, recovering: 恢复中
+
+    venue_id = Column(Integer, ForeignKey("venues.id"), nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    rolled_back_at = Column(DateTime, nullable=True)
+
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    participant_user_ids = Column(Text, default="[]")
+
+    total_steps = Column(Integer, default=0)
+    passed_steps = Column(Integer, default=0)
+    failed_steps = Column(Integer, default=0)
+    error_message = Column(Text, default="")
+
+    drill_session_ids = Column(Text, default="[]")
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    script = relationship("DrillScript", foreign_keys=[script_id])
+    creator = relationship("User", foreign_keys=[created_by])
+    venue = relationship("Venue", foreign_keys=[venue_id])
+
+
+class DrillArtifact(Base):
+    __tablename__ = "drill_artifacts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    batch_id = Column(String(100), nullable=False, index=True)
+
+    artifact_type = Column(String(50), nullable=False)
+    # screenshot: 失败截图, fill_result: 补位结果,
+    # download_summary: 下载文件摘要, op_log: 操作日志
+    # step_result: 步骤执行结果
+
+    title = Column(String(500), default="")
+    content = Column(Text, default="")
+    file_path = Column(String(500), default="")
+    metadata_json = Column(Text, default="{}")
+
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    owner = relationship("User", foreign_keys=[user_id])
+
+
 def get_db():
     db = SessionLocal()
     try:

@@ -806,3 +806,226 @@ body {
         font-size: 13px;
     }
 }
+
+.drill-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 2px solid #e5e7eb;
+    margin-bottom: 20px;
+}
+
+.drill-subtab {
+    padding: 12px 24px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font-size: 15px;
+    font-weight: 500;
+    color: #6b7280;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: all 0.2s;
+}
+
+.drill-subtab:hover {
+    color: #667eea;
+}
+
+.drill-subtab.active {
+    color: #667eea;
+    border-bottom-color: #667eea;
+    background: rgba(102, 126, 234, 0.05);
+}
+
+.drill-subtab-content {
+    display: none;
+}
+
+.drill-subtab-content.active {
+    display: block;
+}
+
+.script-card, .batch-card {
+    background: white;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    transition: all 0.2s;
+}
+
+.script-card:hover, .batch-card:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    transform: translateY(-1px);
+}
+
+.script-card-header, .batch-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 12px;
+}
+
+.script-card-title {
+    font-size: 17px;
+    font-weight: 600;
+    color: #1f2937;
+}
+
+.script-card-meta, .batch-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin-bottom: 12px;
+    font-size: 13px;
+    color: #6b7280;
+}
+
+.script-card-meta span, .batch-card-meta span {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.script-card-stats, .batch-card-stats {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 12px;
+    padding: 10px 14px;
+    background: #f9fafb;
+    border-radius: 6px;
+}
+
+.script-card-stats div, .batch-card-stats div {
+    font-size: 13px;
+    color: #4b5563;
+}
+
+.script-card-stats strong, .batch-card-stats strong {
+    color: #1f2937;
+    font-size: 15px;
+}
+
+.script-card-actions, .batch-card-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+}
+
+.script-card-actions .btn, .batch-card-actions .btn {
+    padding: 6px 14px;
+    font-size: 12px;
+}
+
+.status-batch-pending {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.status-batch-running {
+    background: #dbeafe;
+    color: #1e40af;
+    animation: pulse 1.5s infinite;
+}
+
+.status-batch-completed {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.status-batch-failed {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.status-batch-rolled_back {
+    background: #e5e7eb;
+    color: #374151;
+}
+
+.status-batch-recovering {
+    background: #ede9fe;
+    color: #5b21b6;
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+.artifact-item {
+    background: #f9fafb;
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 8px;
+    border-left: 3px solid #667eea;
+}
+
+.artifact-item.screenshot {
+    border-left-color: #ef4444;
+}
+
+.artifact-item.fill_result {
+    border-left-color: #10b981;
+}
+
+.artifact-item.download_summary {
+    border-left-color: #8b5cf6;
+}
+
+.artifact-item.op_log {
+    border-left-color: #f59e0b;
+}
+
+.artifact-item.step_result {
+    border-left-color: #0ea5e9;
+}
+
+.artifact-title {
+    font-weight: 600;
+    font-size: 14px;
+    color: #1f2937;
+    margin-bottom: 4px;
+}
+
+.artifact-type-label {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    margin-left: 8px;
+    font-weight: 500;
+}
+
+.artifact-content {
+    font-size: 12px;
+    color: #4b5563;
+    word-break: break-all;
+    white-space: pre-wrap;
+    background: white;
+    padding: 8px;
+    border-radius: 4px;
+    margin-top: 6px;
+    max-height: 200px;
+    overflow: auto;
+}
+
+.form-row {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.form-row .form-group {
+    flex: 1;
+    margin-bottom: 0;
+}
+
+@media (max-width: 640px) {
+    .form-row {
+        flex-direction: column;
+        gap: 16px;
+    }
+}

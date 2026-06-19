@@ -359,3 +359,167 @@ class DrillRestartVerifyRequest(BaseModel):
     drill_session_id: str
     server_pid: int
     server_port: int = 8002
+
+
+class DrillScriptVenueRules(BaseModel):
+    venue_ids: List[int] = []
+    auto_find_slot: bool = True
+    search_days: int = 30
+    preferred_hours: List[int] = [9, 10, 11, 14, 15, 16, 17, 19, 20]
+
+
+class DrillScriptSample(BaseModel):
+    name: str
+    type: str
+    priority: int = 10
+    float_before_minutes: int = 30
+    float_after_minutes: int = 30
+
+
+class DrillScriptMember(BaseModel):
+    username: str
+    password: str
+    full_name: str
+    role: str = "member"
+
+
+class DrillScriptCheckpoint(BaseModel):
+    name: str
+    description: str = ""
+    expected: str = "passed"
+
+
+class DrillScriptCleanupStrategy(BaseModel):
+    auto_cleanup_on_success: bool = True
+    keep_screenshots: bool = True
+    keep_logs: bool = True
+    keep_fill_results: bool = True
+
+
+class DrillScriptBase(BaseModel):
+    name: str
+    description: str = ""
+    version: str = "1.0"
+    venue_rules: Dict = {}
+    drill_samples: List = []
+    member_accounts: List = []
+    checkpoints: List = []
+    cleanup_strategy: Dict = {}
+
+
+class DrillScriptCreate(DrillScriptBase):
+    pass
+
+
+class DrillScriptUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    version: Optional[str] = None
+    venue_rules: Optional[Dict] = None
+    drill_samples: Optional[List] = None
+    member_accounts: Optional[List] = None
+    checkpoints: Optional[List] = None
+    cleanup_strategy: Optional[Dict] = None
+    is_active: Optional[bool] = None
+
+
+class DrillScriptResponse(BaseModel):
+    id: int
+    name: str
+    description: str
+    version: str
+    venue_rules: Dict = {}
+    drill_samples: List = []
+    member_accounts: List = []
+    checkpoints: List = []
+    cleanup_strategy: Dict = {}
+    created_by: int
+    created_by_name: Optional[str] = None
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class DrillScriptImportValidateResult(BaseModel):
+    valid: bool
+    errors: List[str] = []
+    warnings: List[str] = []
+
+
+class DrillBatchCreate(BaseModel):
+    script_id: int
+    venue_id: Optional[int] = None
+
+
+class DrillBatchResponse(BaseModel):
+    id: int
+    batch_id: str
+    script_id: int
+    script_name: str
+    status: str
+    venue_id: Optional[int] = None
+    venue_name: Optional[str] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    rolled_back_at: Optional[datetime] = None
+    created_by: int
+    created_by_name: Optional[str] = None
+    participant_user_ids: List = []
+    total_steps: int = 0
+    passed_steps: int = 0
+    failed_steps: int = 0
+    error_message: str = ""
+    drill_session_ids: List = []
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class DrillBatchDetailResponse(DrillBatchResponse):
+    artifacts: List = []
+
+
+class DrillArtifactResponse(BaseModel):
+    id: int
+    batch_id: str
+    artifact_type: str
+    title: str
+    content: str
+    file_path: str
+    metadata: Dict = {}
+    user_id: Optional[int] = None
+    user_name: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class DrillMemberBatchView(BaseModel):
+    batch_id: str
+    script_name: str
+    status: str
+    my_entries: List = []
+    my_blocked_reasons: List = []
+    my_fill_results: List = []
+
+
+class DrillRollbackResponse(BaseModel):
+    batch_id: str
+    success: bool
+    removed_count: int = 0
+    details: Dict = {}
+    message: str = ""
+
+
+class DrillRecoverResponse(BaseModel):
+    batch_id: str
+    success: bool
+    previous_status: str = ""
+    current_status: str = ""
+    message: str = ""

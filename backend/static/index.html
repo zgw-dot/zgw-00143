@@ -46,6 +46,7 @@
                 <button class="nav-tab active" data-tab="bookings">预约列表</button>
                 <button class="nav-tab" data-tab="waitlist">候补补位</button>
                 <button class="nav-tab" data-tab="new-booking">新建预约</button>
+                <button class="nav-tab admin-only" data-tab="drill-center" style="display:none;">演练剧本中心</button>
                 <button class="nav-tab admin-only" data-tab="config" style="display:none;">配置管理</button>
             </nav>
 
@@ -232,6 +233,79 @@
                         </div>
                     </div>
                 </section>
+
+                <section id="tab-drill-center" class="tab-content">
+                    <div class="drill-tabs">
+                        <button class="drill-subtab active" data-subtab="scripts">📜 剧本列表</button>
+                        <button class="drill-subtab" data-subtab="batches">📦 演练批次</button>
+                    </div>
+
+                    <div id="drill-subtab-scripts" class="drill-subtab-content active">
+                        <div class="filter-bar">
+                            <div class="filter-item">
+                                <label>关键词</label>
+                                <input type="text" id="script-keyword" placeholder="搜索剧本名称/描述...">
+                            </div>
+                            <div class="filter-item">
+                                <label>状态</label>
+                                <select id="script-status">
+                                    <option value="">全部</option>
+                                    <option value="true">启用</option>
+                                    <option value="false">停用</option>
+                                </select>
+                            </div>
+                            <div class="filter-item">
+                                <button id="script-search-btn" class="btn btn-primary">搜索</button>
+                                <button id="script-reset-btn" class="btn btn-outline">重置</button>
+                                <button id="script-create-btn" class="btn btn-primary">+ 新建剧本</button>
+                                <button id="script-default-btn" class="btn btn-success">+ 使用默认模板</button>
+                                <button id="script-import-btn" class="btn btn-secondary">📥 导入JSON</button>
+                                <input type="file" id="script-import-file" accept=".json" style="display:none;">
+                            </div>
+                        </div>
+
+                        <div class="booking-list-header">
+                            <h2>演练剧本列表</h2>
+                            <span id="script-count" class="count-badge"></span>
+                        </div>
+
+                        <div class="booking-list" id="script-list"></div>
+                    </div>
+
+                    <div id="drill-subtab-batches" class="drill-subtab-content">
+                        <div class="filter-bar">
+                            <div class="filter-item">
+                                <label>剧本</label>
+                                <select id="batch-filter-script">
+                                    <option value="">全部剧本</option>
+                                </select>
+                            </div>
+                            <div class="filter-item">
+                                <label>状态</label>
+                                <select id="batch-filter-status">
+                                    <option value="">全部状态</option>
+                                    <option value="pending">待执行</option>
+                                    <option value="running">执行中</option>
+                                    <option value="completed">已完成</option>
+                                    <option value="failed">失败</option>
+                                    <option value="rolled_back">已回滚</option>
+                                    <option value="recovering">恢复中</option>
+                                </select>
+                            </div>
+                            <div class="filter-item">
+                                <button id="batch-search-btn" class="btn btn-primary">搜索</button>
+                                <button id="batch-reset-btn" class="btn btn-outline">重置</button>
+                            </div>
+                        </div>
+
+                        <div class="booking-list-header">
+                            <h2>演练批次列表</h2>
+                            <span id="batch-count" class="count-badge"></span>
+                        </div>
+
+                        <div class="booking-list" id="batch-list"></div>
+                    </div>
+                </section>
             </main>
         </div>
 
@@ -343,6 +417,111 @@
                 <div class="modal-footer">
                     <button class="btn btn-outline modal-close-btn">取消</button>
                     <button id="wl-submit-btn" class="btn btn-primary">提交候补</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="script-create-modal" class="modal" style="display:none;">
+            <div class="modal-content large-modal">
+                <div class="modal-header">
+                    <h2 id="script-modal-title">新建演练剧本</h2>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <form id="script-create-form">
+                        <input type="hidden" id="script-id">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>剧本名称 *</label>
+                                <input type="text" id="script-name" placeholder="请输入剧本名称" required>
+                            </div>
+                            <div class="form-group">
+                                <label>版本</label>
+                                <input type="text" id="script-version" value="1.0">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>描述</label>
+                            <textarea id="script-description" rows="2" placeholder="请输入剧本描述"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>场地规则 (JSON)</label>
+                            <textarea id="script-venue-rules" rows="4"
+                                      placeholder='{"venue_ids":[],"auto_find_slot":true,"search_days":30}'></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>演练样本 (JSON数组)</label>
+                            <textarea id="script-drill-samples" rows="4"
+                                      placeholder='[{"name":"样本1","type":"waiting","priority":10}]'></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>成员账号 (JSON数组)</label>
+                            <textarea id="script-member-accounts" rows="4"
+                                      placeholder='[{"username":"user1","password":"pass","full_name":"用户1","role":"member"}]'></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>检查点 (JSON数组)</label>
+                            <textarea id="script-checkpoints" rows="4"
+                                      placeholder='[{"name":"检查点1","description":"","expected":"passed"}]'></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>清理策略 (JSON)</label>
+                            <textarea id="script-cleanup-strategy" rows="3"
+                                      placeholder='{"auto_cleanup_on_success":false,"keep_logs":true}'></textarea>
+                        </div>
+                        <div id="script-create-warn" class="conflict-warning" style="display:none;"></div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline modal-close-btn">取消</button>
+                    <button id="script-submit-btn" class="btn btn-primary">保存剧本</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="batch-detail-modal" class="modal" style="display:none;">
+            <div class="modal-content large-modal">
+                <div class="modal-header">
+                    <h2 id="batch-detail-title">批次详情</h2>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body" id="batch-detail-body"></div>
+                <div class="modal-footer" id="batch-detail-footer"></div>
+            </div>
+        </div>
+
+        <div id="script-detail-modal" class="modal" style="display:none;">
+            <div class="modal-content large-modal">
+                <div class="modal-header">
+                    <h2 id="script-detail-title">剧本详情</h2>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body" id="script-detail-body"></div>
+                <div class="modal-footer" id="script-detail-footer"></div>
+            </div>
+        </div>
+
+        <div id="batch-create-modal" class="modal" style="display:none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>创建演练批次</h2>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label>选择剧本 *</label>
+                        <select id="batch-create-script" required></select>
+                    </div>
+                    <div class="form-group">
+                        <label>选择场地（可选，留空使用剧本默认）</label>
+                        <select id="batch-create-venue">
+                            <option value="">使用剧本默认</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline modal-close-btn">取消</button>
+                    <button id="batch-submit-btn" class="btn btn-primary">创建批次</button>
                 </div>
             </div>
         </div>

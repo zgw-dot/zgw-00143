@@ -1615,6 +1615,671 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    function escapeHtml(str) {
+        if (!str) return '';
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
+    let drillScripts = [];
+    let drillBatches = [];
+    let scriptFilter = { keyword: '', is_active: '' };
+    let batchFilter = { script_id: '', status: '' };
+
+    function getBatchStatusText(status) {
+        const map = {
+            pending: '待执行',
+            running: '执行中',
+            completed: '已完成',
+            failed: '失败',
+            rolled_back: '已回滚',
+            recovering: '恢复中'
+        };
+        return map[status] || status;
+    }
+
+    function getBatchStatusClass(status) {
+        return `status-batch-${status}`;
+    }
+
+    function getArtifactTypeText(type) {
+        const map = {
+            screenshot: '失败截图',
+            fill_result: '补位结果',
+            download_summary: '下载摘要',
+            op_log: '操作日志',
+            step_result: '步骤结果'
+        };
+        return map[type] || type;
+    }
+
+    async function loadDrillScripts() {
+        try {
+            const params = new URLSearchParams();
+            if (scriptFilter.keyword) params.append('keyword', scriptFilter.keyword);
+            if (scriptFilter.is_active !== '') params.append('is_active', scriptFilter.is_active);
+
+            const data = await apiRequest(`/drill-center/scripts?${params.toString()}`);
+            drillScripts = data;
+            renderDrillScripts();
+            renderScriptSelectOptions();
+            renderBatchScriptFilter();
+        } catch (e) {
+            showToast('加载剧本列表失败', 'error');
+            console.error(e);
+        }
+    }
+
+    function renderDrillScripts() {
+        const listEl = document.getElementById('script-list');
+        const countEl = document.getElementById('script-count');
+
+        countEl.textContent = `共 ${drillScripts.length} 个`;
+
+        if (drillScripts.length === 0) {
+            listEl.innerHTML = '<div style="text-align:center;padding:40px;color:#999;">暂无演练剧本，点击"新建剧本"或"使用默认模板"开始</div>';
+            return;
+        }
+
+        listEl.innerHTML = drillScripts.map(s => {
+            const venueRules = s.venue_rules || {};
+            const samples = s.drill_samples || [];
+            const members = s.member_accounts || [];
+            const checkpoints = s.checkpoints || [];
+
+            return `
+            <div class="script-card">
+                <div class="script-card-header">
+                    <span class="script-card-title">📜 ${escapeHtml(s.name)}
+                        <span style="font-size:12px;color:#999;font-weight:normal;">v${escapeHtml(s.version || '1.0')}</span>
+                        <span class="status-badge ${s.is_active ? 'status-confirmed' : 'status-cancelled'}"
+                              style="font-size:11px;margin-left:8px;">
+                            ${s.is_active ? '启用' : '停用'}
+                        </span>
+                    </span>
+                </div>
+                <div class="script-card-meta">
+                    <span>📝 ${escapeHtml(s.description || '无描述')}</span>
+                    <span>👤 创建人: ${escapeHtml(s.created_by_name || '-')}</span>
+                    <span>🕐 ${formatDateTime(s.created_at)}</span>
+                </div>
+                <div class="script-card-stats">
+                    <div>🎯 样本数: <strong>${samples.length}</strong></div>
+                    <div>👥 成员数: <strong>${members.length}</strong></div>
+                    <div>✅ 检查点: <strong>${checkpoints.length}</strong></div>
+                    <div>🏢 场地规则: <strong>${venueRules.venue_ids ? venueRules.venue_ids.length : 0}</strong> 个指定</div>
+                </div>
+                <div class="script-card-actions">
+                    <button class="btn btn-outline" onclick="showScriptDetail(${s.id})">查看</button>
+                    <button class="btn btn-primary" onclick="openScriptEditModal(${s.id})">编辑</button>
+                    <button class="btn btn-secondary" onclick="exportScript(${s.id})">📤 导出JSON</button>
+                    <button class="btn btn-success" onclick="openBatchCreateModal(${s.id})">▶ 创建批次</button>
+                    ${currentUser.role === 'admin' ? `<button class="btn btn-danger" onclick="deleteScript(${s.id})">删除</button>` : ''}
+                </div>
+            </div>
+            `;
+        }).join('');
+    }
+
+    function renderScriptSelectOptions() {
+        const sel = document.getElementById('batch-create-script');
+        if (!sel) return;
+        const options = drillScripts
+            .filter(s => s.is_active)
+            .map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`)
+            .join('');
+        sel.innerHTML = options;
+    }
+
+    function renderBatchScriptFilter() {
+        const sel = document.getElementById('batch-filter-script');
+        if (!sel) return;
+        const options = drillScripts.map(s =>
+            `<option value="${s.id}">${escapeHtml(s.name)}</option>`
+        ).join('');
+        sel.innerHTML = '<option value="">全部剧本</option>' + options;
+    }
+
+    async function showScriptDetail(scriptId) {
+        try {
+            const s = await apiRequest(`/drill-center/scripts/${scriptId}`);
+            document.getElementById('script-detail-title').textContent = `剧本详情: ${s.name}`;
+
+            const prettyJson = (obj) => JSON.stringify(obj, null, 2);
+
+            document.getElementById('script-detail-body').innerHTML = `
+                <div class="detail-section">
+                    <h3>基本信息</h3>
+                    <div class="detail-row"><span class="detail-label">名称</span><span class="detail-value">${escapeHtml(s.name)}</span></div>
+                    <div class="detail-row"><span class="detail-label">版本</span><span class="detail-value">${escapeHtml(s.version || '-')}</span></div>
+                    <div class="detail-row"><span class="detail-label">状态</span><span class="detail-value">${s.is_active ? '启用' : '停用'}</span></div>
+                    <div class="detail-row"><span class="detail-label">描述</span><span class="detail-value">${escapeHtml(s.description || '-')}</span></div>
+                    <div class="detail-row"><span class="detail-label">创建人</span><span class="detail-value">${escapeHtml(s.created_by_name || '-')}</span></div>
+                    <div class="detail-row"><span class="detail-label">创建时间</span><span class="detail-value">${formatDateTime(s.created_at)}</span></div>
+                </div>
+                <div class="detail-section">
+                    <h3>🏢 场地规则</h3>
+                    <pre style="background:#f9fafb;padding:12px;border-radius:6px;overflow:auto;">${escapeHtml(prettyJson(s.venue_rules || {}))}</pre>
+                </div>
+                <div class="detail-section">
+                    <h3>🎯 演练样本</h3>
+                    <pre style="background:#f9fafb;padding:12px;border-radius:6px;overflow:auto;">${escapeHtml(prettyJson(s.drill_samples || []))}</pre>
+                </div>
+                <div class="detail-section">
+                    <h3>👥 成员账号</h3>
+                    <pre style="background:#f9fafb;padding:12px;border-radius:6px;overflow:auto;">${escapeHtml(prettyJson(s.member_accounts || []))}</pre>
+                </div>
+                <div class="detail-section">
+                    <h3>✅ 检查点</h3>
+                    <pre style="background:#f9fafb;padding:12px;border-radius:6px;overflow:auto;">${escapeHtml(prettyJson(s.checkpoints || []))}</pre>
+                </div>
+                <div class="detail-section">
+                    <h3>🧹 清理策略</h3>
+                    <pre style="background:#f9fafb;padding:12px;border-radius:6px;overflow:auto;">${escapeHtml(prettyJson(s.cleanup_strategy || {}))}</pre>
+                </div>
+            `;
+
+            let footer = '';
+            if (currentUser.role === 'admin') {
+                footer += `<button class="btn btn-primary" onclick="openScriptEditModal(${s.id});closeModal('script-detail-modal');">编辑</button>`;
+                footer += `<button class="btn btn-secondary" onclick="exportScript(${s.id})">📤 导出JSON</button>`;
+                footer += `<button class="btn btn-success" onclick="openBatchCreateModal(${s.id});closeModal('script-detail-modal');">▶ 创建批次</button>`;
+            }
+            footer += '<button class="btn btn-outline modal-close-btn">关闭</button>';
+            document.getElementById('script-detail-footer').innerHTML = footer;
+
+            document.getElementById('script-detail-modal').style.display = 'flex';
+        } catch (e) {
+            handleApiError(e);
+        }
+    }
+
+    function openScriptCreateModal() {
+        document.getElementById('script-modal-title').textContent = '新建演练剧本';
+        document.getElementById('script-id').value = '';
+        document.getElementById('script-name').value = '';
+        document.getElementById('script-version').value = '1.0';
+        document.getElementById('script-description').value = '';
+        document.getElementById('script-venue-rules').value = JSON.stringify({
+            venue_ids: [],
+            auto_find_slot: true,
+            search_days: 30,
+            preferred_hours: [9, 10, 11, 14, 15, 16, 17, 19, 20]
+        }, null, 2);
+        document.getElementById('script-drill-samples').value = JSON.stringify([
+            { name: '低优先级候补', type: 'low_priority', priority: 5, float_before_minutes: 30, float_after_minutes: 30 },
+            { name: '高优先级候补', type: 'high_priority', priority: 15, float_before_minutes: 60, float_after_minutes: 60 }
+        ], null, 2);
+        document.getElementById('script-member-accounts').value = JSON.stringify([
+            { username: 'drill_member1', password: 'drill1234', full_name: '演练成员1', role: 'member' },
+            { username: 'drill_member2', password: 'drill1234', full_name: '演练成员2', role: 'member' },
+            { username: 'drill_admin', password: 'admin1234', full_name: '演练管理员', role: 'admin' }
+        ], null, 2);
+        document.getElementById('script-checkpoints').value = JSON.stringify([
+            { name: '用户创建验证', description: '验证演练账号正确创建', expected: 'passed' },
+            { name: '候补排队验证', description: '验证优先级和排队顺序', expected: 'passed' },
+            { name: '自动补位验证', description: '验证释放资源后自动补位', expected: 'passed' }
+        ], null, 2);
+        document.getElementById('script-cleanup-strategy').value = JSON.stringify({
+            auto_cleanup_on_success: false,
+            keep_screenshots: true,
+            keep_logs: true,
+            keep_fill_results: true
+        }, null, 2);
+        document.getElementById('script-create-warn').style.display = 'none';
+        document.getElementById('script-create-modal').style.display = 'flex';
+    }
+
+    async function openScriptEditModal(scriptId) {
+        try {
+            const s = await apiRequest(`/drill-center/scripts/${scriptId}`);
+            document.getElementById('script-modal-title').textContent = '编辑演练剧本';
+            document.getElementById('script-id').value = s.id;
+            document.getElementById('script-name').value = s.name;
+            document.getElementById('script-version').value = s.version || '1.0';
+            document.getElementById('script-description').value = s.description || '';
+            document.getElementById('script-venue-rules').value = JSON.stringify(s.venue_rules || {}, null, 2);
+            document.getElementById('script-drill-samples').value = JSON.stringify(s.drill_samples || [], null, 2);
+            document.getElementById('script-member-accounts').value = JSON.stringify(s.member_accounts || [], null, 2);
+            document.getElementById('script-checkpoints').value = JSON.stringify(s.checkpoints || [], null, 2);
+            document.getElementById('script-cleanup-strategy').value = JSON.stringify(s.cleanup_strategy || {}, null, 2);
+            document.getElementById('script-create-warn').style.display = 'none';
+            document.getElementById('script-create-modal').style.display = 'flex';
+        } catch (e) {
+            handleApiError(e);
+        }
+    }
+
+    function _tryParseJSON(text, fieldName) {
+        try {
+            return JSON.parse(text || '{}');
+        } catch (e) {
+            throw new Error(`${fieldName} JSON格式错误: ${e.message}`);
+        }
+    }
+
+    async function submitScriptSave() {
+        const id = document.getElementById('script-id').value;
+        const name = document.getElementById('script-name').value.trim();
+        const version = document.getElementById('script-version').value.trim() || '1.0';
+        const description = document.getElementById('script-description').value.trim();
+
+        if (!name) {
+            showToast('请填写剧本名称', 'warning');
+            return;
+        }
+
+        try {
+            const venue_rules = _tryParseJSON(document.getElementById('script-venue-rules').value, '场地规则');
+            const drill_samples = _tryParseJSON(document.getElementById('script-drill-samples').value, '演练样本');
+            const member_accounts = _tryParseJSON(document.getElementById('script-member-accounts').value, '成员账号');
+            const checkpoints = _tryParseJSON(document.getElementById('script-checkpoints').value, '检查点');
+            const cleanup_strategy = _tryParseJSON(document.getElementById('script-cleanup-strategy').value, '清理策略');
+
+            const payload = { name, version, description, venue_rules, drill_samples, member_accounts, checkpoints, cleanup_strategy };
+
+            let result;
+            if (id) {
+                result = await apiRequest(`/drill-center/scripts/${id}`, {
+                    method: 'PUT',
+                    body: JSON.stringify(payload)
+                });
+            } else {
+                result = await apiRequest('/drill-center/scripts', {
+                    method: 'POST',
+                    body: JSON.stringify(payload)
+                });
+            }
+
+            showToast(id ? '剧本更新成功' : '剧本创建成功');
+            closeModal('script-create-modal');
+            loadDrillScripts();
+        } catch (e) {
+            const warnEl = document.getElementById('script-create-warn');
+            warnEl.innerHTML = `<h3>❌ ${escapeHtml(e.detail?.message || e.detail || e.message || '保存失败')}</h3>
+                ${e.detail?.errors ? `<div style="margin-top:8px;color:#e74c3c;">${escapeHtml(e.detail.errors.join('; '))}</div>` : ''}`;
+            warnEl.style.display = 'block';
+        }
+    }
+
+    async function deleteScript(scriptId) {
+        if (!confirm('确定删除此剧本？删除后不可恢复，关联的已完成批次不受影响。')) return;
+        try {
+            await apiRequest(`/drill-center/scripts/${scriptId}`, { method: 'DELETE' });
+            showToast('剧本已删除');
+            loadDrillScripts();
+        } catch (e) {
+            handleApiError(e);
+        }
+    }
+
+    async function createDefaultScript() {
+        if (!confirm('确定使用默认模板创建一个新剧本？')) return;
+        try {
+            await apiRequest('/drill-center/scripts/default', { method: 'POST' });
+            showToast('默认剧本创建成功');
+            loadDrillScripts();
+        } catch (e) {
+            handleApiError(e);
+        }
+    }
+
+    async function exportScript(scriptId) {
+        try {
+            const data = await apiRequest(`/drill-center/scripts/${scriptId}/export`);
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `drill_script_${scriptId}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+            showToast('导出成功');
+        } catch (e) {
+            handleApiError(e);
+        }
+    }
+
+    function triggerScriptImport() {
+        document.getElementById('script-import-file').click();
+    }
+
+    async function handleScriptImportFile(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const token = getToken();
+            const validateRes = await fetch(`${API_BASE}/drill-center/scripts/validate`, {
+                method: 'POST',
+                headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+                body: formData
+            });
+
+            const validation = await validateRes.json();
+            if (!validation.valid) {
+                alert(`导入校验失败:\n${validation.errors.join('\n')}${validation.warnings.length ? '\n\n警告:\n' + validation.warnings.join('\n') : ''}`);
+                return;
+            }
+            if (validation.warnings.length) {
+                if (!confirm(`校验通过，但有警告:\n${validation.warnings.join('\n')}\n\n是否继续导入？`)) {
+                    return;
+                }
+            }
+
+            formData.delete('file');
+            formData.append('file', file);
+            const importRes = await fetch(`${API_BASE}/drill-center/scripts/import`, {
+                method: 'POST',
+                headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+                body: formData
+            });
+
+            if (!importRes.ok) {
+                const errData = await importRes.json().catch(() => ({}));
+                throw new Error(errData.detail || '导入失败');
+            }
+
+            showToast('剧本导入成功');
+            loadDrillScripts();
+        } catch (e) {
+            showToast(e.message || '导入失败', 'error');
+        } finally {
+            e.target.value = '';
+        }
+    }
+
+    async function loadDrillBatches() {
+        try {
+            const params = new URLSearchParams();
+            if (batchFilter.script_id) params.append('script_id', batchFilter.script_id);
+            if (batchFilter.status) params.append('status', batchFilter.status);
+
+            const data = await apiRequest(`/drill-center/batches?${params.toString()}`);
+            drillBatches = data;
+            renderDrillBatches();
+        } catch (e) {
+            showToast('加载批次列表失败', 'error');
+            console.error(e);
+        }
+    }
+
+    function renderDrillBatches() {
+        const listEl = document.getElementById('batch-list');
+        const countEl = document.getElementById('batch-count');
+
+        countEl.textContent = `共 ${drillBatches.length} 个`;
+
+        if (drillBatches.length === 0) {
+            listEl.innerHTML = '<div style="text-align:center;padding:40px;color:#999;">暂无演练批次，在剧本列表中点击"创建批次"开始</div>';
+            return;
+        }
+
+        listEl.innerHTML = drillBatches.map(b => {
+            return `
+            <div class="batch-card">
+                <div class="batch-card-header">
+                    <span class="script-card-title">📦 ${escapeHtml(b.batch_id)}
+                        <span class="status-badge ${getBatchStatusClass(b.status)}" style="font-size:12px;margin-left:8px;">
+                            ${getBatchStatusText(b.status)}
+                        </span>
+                    </span>
+                </div>
+                <div class="batch-card-meta">
+                    <span>📜 剧本: ${escapeHtml(b.script_name || '-')}</span>
+                    <span>🏢 场地: ${escapeHtml(b.venue_name || '默认')}</span>
+                    <span>👤 创建人: ${escapeHtml(b.created_by_name || '-')}</span>
+                    <span>🕐 创建: ${formatDateTime(b.created_at)}</span>
+                    ${b.completed_at ? `<span>✅ 完成: ${formatDateTime(b.completed_at)}</span>` : ''}
+                </div>
+                <div class="batch-card-stats">
+                    <div>📊 总步骤: <strong>${b.total_steps || 0}</strong></div>
+                    <div style="color:#10b981;">✅ 通过: <strong>${b.passed_steps || 0}</strong></div>
+                    <div style="color:#ef4444;">❌ 失败: <strong>${b.failed_steps || 0}</strong></div>
+                    <div>🧪 会话数: <strong>${(b.drill_session_ids || []).length}</strong></div>
+                </div>
+                ${b.error_message ? `<div style="background:#fef2f2;color:#b91c1c;padding:8px 12px;border-radius:4px;font-size:13px;margin-bottom:10px;">
+                    ❌ 错误: ${escapeHtml(b.error_message)}
+                </div>` : ''}
+                <div class="batch-card-actions">
+                    <button class="btn btn-outline" onclick="showBatchDetail('${escapeHtml(b.batch_id)}')">查看详情</button>
+                    ${currentUser.role === 'admin' && b.status === 'pending' ?
+                        `<button class="btn btn-success" onclick="executeBatch('${escapeHtml(b.batch_id)}')">▶ 执行</button>` : ''}
+                    ${currentUser.role === 'admin' && (b.status === 'failed' || b.status === 'running') ?
+                        `<button class="btn btn-warning" onclick="recoverBatch('${escapeHtml(b.batch_id)}')">🔄 恢复</button>` : ''}
+                    ${currentUser.role === 'admin' && (b.status === 'completed' || b.status === 'failed') ?
+                        `<button class="btn btn-danger" onclick="rollbackBatch('${escapeHtml(b.batch_id)}')">↩️ 回滚清理</button>` : ''}
+                </div>
+            </div>
+            `;
+        }).join('');
+    }
+
+    async function showBatchDetail(batchId) {
+        try {
+            const b = await apiRequest(`/drill-center/batches/${batchId}`);
+            document.getElementById('batch-detail-title').textContent = `批次详情: ${b.batch_id}`;
+
+            let artifactsHtml = '';
+            if (b.artifacts && b.artifacts.length > 0) {
+                artifactsHtml = `
+                <div class="detail-section">
+                    <h3>📁 执行产物 (${b.artifacts.length})</h3>
+                    ${b.artifacts.map(a => `
+                        <div class="artifact-item ${a.artifact_type}">
+                            <div class="artifact-title">
+                                ${escapeHtml(a.title || '(无标题)')}
+                                <span class="artifact-type-label status-batch-pending">${getArtifactTypeText(a.artifact_type)}</span>
+                                <span style="font-size:11px;color:#999;margin-left:8px;">${formatDateTime(a.created_at)}</span>
+                            </div>
+                            ${a.content ? `<div class="artifact-content">${escapeHtml(a.content)}</div>` : ''}
+                        </div>
+                    `).join('')}
+                </div>`;
+            }
+
+            document.getElementById('batch-detail-body').innerHTML = `
+                <div class="detail-section">
+                    <h3>基本信息</h3>
+                    <div class="detail-row"><span class="detail-label">批次ID</span><span class="detail-value"><code>${escapeHtml(b.batch_id)}</code></span></div>
+                    <div class="detail-row"><span class="detail-label">剧本</span><span class="detail-value">${escapeHtml(b.script_name || '-')}</span></div>
+                    <div class="detail-row"><span class="detail-label">状态</span><span class="detail-value">
+                        <span class="status-badge ${getBatchStatusClass(b.status)}">${getBatchStatusText(b.status)}</span>
+                    </span></div>
+                    <div class="detail-row"><span class="detail-label">场地</span><span class="detail-value">${escapeHtml(b.venue_name || '默认')}</span></div>
+                    <div class="detail-row"><span class="detail-label">创建人</span><span class="detail-value">${escapeHtml(b.created_by_name || '-')}</span></div>
+                    <div class="detail-row"><span class="detail-label">创建时间</span><span class="detail-value">${formatDateTime(b.created_at)}</span></div>
+                    <div class="detail-row"><span class="detail-label">开始时间</span><span class="detail-value">${b.started_at ? formatDateTime(b.started_at) : '-'}</span></div>
+                    <div class="detail-row"><span class="detail-label">完成时间</span><span class="detail-value">${b.completed_at ? formatDateTime(b.completed_at) : '-'}</span></div>
+                    ${b.rolled_back_at ? `<div class="detail-row"><span class="detail-label">回滚时间</span><span class="detail-value">${formatDateTime(b.rolled_back_at)}</span></div>` : ''}
+                </div>
+                <div class="detail-section">
+                    <h3>执行结果</h3>
+                    <div class="detail-row"><span class="detail-label">总步骤</span><span class="detail-value">${b.total_steps || 0}</span></div>
+                    <div class="detail-row"><span class="detail-label">通过</span><span class="detail-value" style="color:#10b981;">${b.passed_steps || 0}</span></div>
+                    <div class="detail-row"><span class="detail-label">失败</span><span class="detail-value" style="color:#ef4444;">${b.failed_steps || 0}</span></div>
+                    <div class="detail-row"><span class="detail-label">演练会话</span><span class="detail-value">${(b.drill_session_ids || []).join(', ') || '-'}</span></div>
+                    ${b.error_message ? `<div class="detail-row"><span class="detail-label">错误信息</span><span class="detail-value" style="color:#ef4444;">${escapeHtml(b.error_message)}</span></div>` : ''}
+                </div>
+                ${artifactsHtml}
+            `;
+
+            let footer = '';
+            if (currentUser.role === 'admin') {
+                if (b.status === 'pending') {
+                    footer += `<button class="btn btn-success" onclick="executeBatch('${escapeHtml(b.batch_id)}');closeModal('batch-detail-modal');">▶ 执行</button>`;
+                }
+                if (b.status === 'failed' || b.status === 'running') {
+                    footer += `<button class="btn btn-warning" onclick="recoverBatch('${escapeHtml(b.batch_id)}');closeModal('batch-detail-modal');">🔄 恢复</button>`;
+                }
+                if (b.status === 'completed' || b.status === 'failed') {
+                    footer += `<button class="btn btn-danger" onclick="rollbackBatch('${escapeHtml(b.batch_id)}');closeModal('batch-detail-modal');">↩️ 回滚清理</button>`;
+                }
+            }
+            footer += '<button class="btn btn-outline modal-close-btn">关闭</button>';
+            document.getElementById('batch-detail-footer').innerHTML = footer;
+
+            document.getElementById('batch-detail-modal').style.display = 'flex';
+        } catch (e) {
+            handleApiError(e);
+        }
+    }
+
+    function openBatchCreateModal(scriptId) {
+        renderScriptSelectOptions();
+        if (scriptId) {
+            document.getElementById('batch-create-script').value = scriptId;
+        }
+        const venueSelect = document.getElementById('batch-create-venue');
+        venueSelect.innerHTML = '<option value="">使用剧本默认</option>' +
+            venues.map(v => `<option value="${v.id}">${escapeHtml(v.name)}</option>`).join('');
+        document.getElementById('batch-create-modal').style.display = 'flex';
+    }
+
+    async function submitBatchCreate() {
+        const script_id = parseInt(document.getElementById('batch-create-script').value);
+        const venue_val = document.getElementById('batch-create-venue').value;
+        const venue_id = venue_val ? parseInt(venue_val) : null;
+
+        if (!script_id) {
+            showToast('请选择剧本', 'warning');
+            return;
+        }
+
+        try {
+            const result = await apiRequest('/drill-center/batches', {
+                method: 'POST',
+                body: JSON.stringify({ script_id, venue_id })
+            });
+            showToast('批次创建成功');
+            closeModal('batch-create-modal');
+            loadDrillBatches();
+            switchDrillSubtab('batches');
+        } catch (e) {
+            handleApiError(e);
+        }
+    }
+
+    async function executeBatch(batchId) {
+        if (!confirm(`确定执行批次 ${batchId}？执行可能需要较长时间。`)) return;
+        try {
+            showToast('开始执行，请稍候...');
+            const result = await apiRequest(`/drill-center/batches/${batchId}/execute`, {
+                method: 'POST'
+            });
+            showToast(result.status === 'completed' ? '批次执行完成' :
+                      result.status === 'failed' ? '批次执行失败，请查看详情' : '批次执行中');
+            loadDrillBatches();
+        } catch (e) {
+            handleApiError(e);
+        }
+    }
+
+    async function rollbackBatch(batchId) {
+        if (!confirm(`确定回滚并清理批次 ${batchId}？所有演练数据将被清除。`)) return;
+        try {
+            const result = await apiRequest(`/drill-center/batches/${batchId}/rollback`, {
+                method: 'POST'
+            });
+            if (result.success) {
+                showToast(`回滚成功，清理 ${result.removed_count} 条数据`);
+            } else {
+                showToast(result.message || '回滚失败', 'error');
+            }
+            loadDrillBatches();
+        } catch (e) {
+            handleApiError(e);
+        }
+    }
+
+    async function recoverBatch(batchId) {
+        if (!confirm(`确定恢复批次 ${batchId}？将验证数据完整性并重置状态。`)) return;
+        try {
+            const result = await apiRequest(`/drill-center/batches/${batchId}/recover`, {
+                method: 'POST'
+            });
+            showToast(result.message || (result.success ? '恢复成功' : '恢复失败'));
+            loadDrillBatches();
+        } catch (e) {
+            handleApiError(e);
+        }
+    }
+
+    function switchDrillSubtab(name) {
+        document.querySelectorAll('.drill-subtab').forEach(t => {
+            t.classList.toggle('active', t.dataset.subtab === name);
+        });
+        document.querySelectorAll('.drill-subtab-content').forEach(c => {
+            c.classList.toggle('active', c.id === `drill-subtab-${name}`);
+        });
+        if (name === 'scripts') loadDrillScripts();
+        if (name === 'batches') loadDrillBatches();
+    }
+
+    function closeModal(modalId) {
+        document.getElementById(modalId).style.display = 'none';
+    }
+
+    document.querySelectorAll('.drill-subtab').forEach(t => {
+        t.addEventListener('click', () => switchDrillSubtab(t.dataset.subtab));
+    });
+
+    document.getElementById('script-search-btn').addEventListener('click', () => {
+        scriptFilter.keyword = document.getElementById('script-keyword').value.trim();
+        scriptFilter.is_active = document.getElementById('script-status').value;
+        loadDrillScripts();
+    });
+
+    document.getElementById('script-reset-btn').addEventListener('click', () => {
+        document.getElementById('script-keyword').value = '';
+        document.getElementById('script-status').value = '';
+        scriptFilter = { keyword: '', is_active: '' };
+        loadDrillScripts();
+    });
+
+    document.getElementById('batch-search-btn').addEventListener('click', () => {
+        batchFilter.script_id = document.getElementById('batch-filter-script').value;
+        batchFilter.status = document.getElementById('batch-filter-status').value;
+        loadDrillBatches();
+    });
+
+    document.getElementById('batch-reset-btn').addEventListener('click', () => {
+        document.getElementById('batch-filter-script').value = '';
+        document.getElementById('batch-filter-status').value = '';
+        batchFilter = { script_id: '', status: '' };
+        loadDrillBatches();
+    });
+
+    document.getElementById('script-create-btn').addEventListener('click', openScriptCreateModal);
+    document.getElementById('script-default-btn').addEventListener('click', createDefaultScript);
+    document.getElementById('script-import-btn').addEventListener('click', triggerScriptImport);
+    document.getElementById('script-import-file').addEventListener('change', handleScriptImportFile);
+    document.getElementById('script-submit-btn').addEventListener('click', submitScriptSave);
+    document.getElementById('batch-submit-btn').addEventListener('click', submitBatchCreate);
+
+    const originalSwitchTab = (tabName) => {
+        document.querySelectorAll('.nav-tab').forEach(t => {
+            t.classList.toggle('active', t.dataset.tab === tabName);
+        });
+        document.querySelectorAll('.tab-content').forEach(c => {
+            c.classList.toggle('active', c.id === `tab-${tabName}`);
+        });
+        if (tabName === 'drill-center') {
+            loadDrillScripts();
+            loadDrillBatches();
+        }
+    };
+
+    document.querySelectorAll('.nav-tab').forEach(t => {
+        t.addEventListener('click', () => originalSwitchTab(t.dataset.tab));
+    });
+
     (async function init() {
         const token = getToken();
         if (token) {
