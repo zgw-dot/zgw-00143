@@ -2336,6 +2336,94 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('script-submit-btn').addEventListener('click', submitScriptSave);
     document.getElementById('batch-submit-btn').addEventListener('click', submitBatchCreate);
 
+    const DS_API = '/drill-schedule';
+    let dsTemplates = [];
+    let dsSchedules = [];
+    let dsAuditLogs = [];
+    let dsMineSchedules = [];
+    let dsCalendarDate = new Date();
+    let dsTemplateFilter = { keyword: '', ttype: '', is_active: '' };
+    let dsScheduleFilter = { keyword: '', status: '', venue_id: '', from_date: '', to_date: '' };
+    let dsAuditFilter = { resource_type: '', action: '', operator: '', from_date: '', to_date: '' };
+    let dsEditingScheduleId = null;
+    let dsEditingTemplateId = null;
+    let dsCancelSchedId = null;
+    let dsCopySchedId = null;
+    let dsDrillScriptsCache = [];
+    let dsVenuesCache = [];
+
+    const DSTypeLabel = { venue: '场地模板', group: '成员分组', checklist: '检查清单', cleanup: '清理规则' };
+    const DSTypeIcon = { venue: '🏢', group: '👥', checklist: '✅', cleanup: '🧹' };
+    const DSScheduleStatusLabel = { draft: '草稿', published: '已发布', locked: '已锁定', executing: '执行中', completed: '已完成', cancelled: '已撤销' };
+    const DSScheduleStatusClass = { draft: 'status-batch-pending', published: 'status-batch-ready', locked: 'status-batch-created', executing: 'status-batch-running', completed: 'status-batch-completed', cancelled: 'status-batch-failed' };
+
+    function switchDsSubtab(subtab) {
+        document.querySelectorAll('.ds-subtab').forEach(t => t.classList.toggle('active', t.dataset.subtab === subtab));
+        document.querySelectorAll('.ds-subtab-content').forEach(c => c.classList.toggle('active', c.id === `ds-subtab-${subtab}`));
+        if (subtab === 'templates') loadDsTemplates();
+        if (subtab === 'calendar') loadDsSchedules();
+        if (subtab === 'mine') loadDsMine();
+        if (subtab === 'audit' && currentUser?.role === 'admin') loadDsAudit();
+        if (subtab === 'audit' && currentUser?.role !== 'admin') showToast('仅管理员可查看审计日志', 'warning');
+    }
+
+    function formatDsTimeHHMM(t) {
+        if (!t) return '-';
+        const s = String(t);
+        if (s.includes(':')) return s.substring(0, 5);
+        return s;
+    }
+
+    async function loadDsDrillScriptsCache() {
+        try {
+            dsDrillScriptsCache = await apiRequest('/drill-center/scripts');
+        } catch (e) { /* 忽略 */ }
+    }
+
+    async function loadDsVenuesCache() {
+        try {
+            dsVenuesCache = venues || await apiRequest('/venues');
+        } catch (e) { /* 忽略 */ }
+    }
+
+    function populateDsVenueOptions(selectId, includeEmpty = true) {
+        const sel = document.getElementById(selectId);
+        if (!sel) return;
+        const opts = dsVenuesCache.map(v => `<option value="${v.id}">${escapeHtml(v.name)} (${escapeHtml(v.location || '')})</option>`);
+        sel.innerHTML = (includeEmpty ? '<option value="">请选择</option>' : '') + opts.join('');
+    }
+
+    function populateDsScriptOptions(selectId, includeEmpty = true) {
+        const sel = document.getElementById(selectId);
+        if (!sel) return;
+        const opts = dsDrillScriptsCache.map(s => `<option value="${s.id}">${escapeHtml(s.name)} v${escapeHtml(s.version || '')}</option>`);
+        sel.innerHTML = (includeEmpty ? '<option value="">未关联</option>' : '') + opts.join('');
+    }
+
+    function populateDsTemplateOptions(selectId, ttype) {
+        const sel = document.getElementById(selectId);
+        if (!sel) return;
+        const matched = dsTemplates.filter(t => t.template_type === ttype && t.is_active);
+        const opts = matched.map(t => `<option value="${t.id}">${escapeHtml(t.name)} [${escapeHtml(t.version || '1.0')}]</option>`);
+        sel.innerHTML = '<option value="">未使用</option>' + opts.join('');
+    }
+
+    async function loadDrillSchedulePage() {
+        await loadDsDrillScriptsCache();
+        await loadDsVenuesCache();
+        populateDsVenueOptions('ds-sched-venue');
+        populateDsVenueOptions('ds-cal-venue');
+        populateDsScriptOptions('ds-sched-script');
+        populateDsScriptOptions('ds-batch-script');
+        await loadDsTemplates();
+        switchDsSubtab('calendar');
+    }
+
+    function setDsElText(elId, value) {
+        const el = document.getElementById(elId);
+        if (el) el.textContent = value;
+    }
+
     const originalSwitchTab = (tabName) => {
         document.querySelectorAll('.nav-tab').forEach(t => {
             t.classList.toggle('active', t.dataset.tab === tabName);
@@ -2347,10 +2435,822 @@ document.addEventListener('DOMContentLoaded', () => {
             loadDrillScripts();
             loadDrillBatches();
         }
+        if (tabName === 'drill-schedule') {
+            loadDrillSchedulePage();
+        }
     };
 
     document.querySelectorAll('.nav-tab').forEach(t => {
         t.addEventListener('click', () => originalSwitchTab(t.dataset.tab));
+    });
+
+    async function loadDsTemplates() {
+        try {
+            const params = new URLSearchParams();
+            if (dsTemplateFilter.keyword) params.append('keyword', dsTemplateFilter.keyword);
+            if (dsTemplateFilter.ttype) params.append('template_type', dsTemplateFilter.ttype);
+            if (dsTemplateFilter.is_active !== '') params.append('is_active', dsTemplateFilter.is_active);
+
+            dsTemplates = await apiRequest(`${DS_API}/templates?${params.toString()}`);
+            renderDsTemplates();
+            populateDsTemplateOptions('ds-sched-venue-tpl', 'venue');
+            populateDsTemplateOptions('ds-sched-group-tpl', 'group');
+            populateDsTemplateOptions('ds-sched-check-tpl', 'checklist');
+            populateDsTemplateOptions('ds-sched-clean-tpl', 'cleanup');
+            populateDsTemplateOptions('ds-batch-venue-tpl', 'venue');
+            populateDsTemplateOptions('ds-batch-group-tpl', 'group');
+        } catch (e) {
+            showToast('加载模板列表失败: ' + (e.detail?.message || e.detail || e.message), 'error');
+        }
+    }
+
+    function renderDsTemplates() {
+        const listEl = document.getElementById('ds-template-list');
+        setDsElText('ds-template-count', `共 ${dsTemplates.length} 个`);
+
+        if (dsTemplates.length === 0) {
+            listEl.innerHTML = '<div style="text-align:center;padding:40px;color:#999;">暂无模板，点击"新建模板"开始创建</div>';
+            return;
+        }
+
+        listEl.innerHTML = dsTemplates.map(t => {
+            const cfg = typeof t.config_json === 'string' ? t.config_json : JSON.stringify(t.config_json || {});
+            return `
+            <div class="script-card">
+                <div class="script-card-header">
+                    <span class="script-card-title">${DSTypeIcon[t.template_type] || '📄'} ${escapeHtml(t.name)}
+                        <span style="font-size:12px;color:#888;margin-left:6px;">v${escapeHtml(t.version || '1.0')}</span>
+                        <span class="status-badge ${t.is_active ? 'status-batch-ready' : 'status-batch-failed'}" style="font-size:12px;margin-left:8px;">
+                            ${t.is_active ? '启用' : '停用'}
+                        </span>
+                    </span>
+                    <span style="font-size:12px;color:#666;">${escapeHtml(DSTypeLabel[t.template_type] || t.template_type)}</span>
+                </div>
+                <div class="script-card-meta">
+                    ${t.description ? `<span>📝 ${escapeHtml(t.description)}</span>` : ''}
+                    <span>👤 创建人: ${escapeHtml(t.created_by_name || '-')}</span>
+                    <span>🕐 创建: ${formatDateTime(t.created_at)}</span>
+                    ${t.updated_at ? `<span>🔄 更新: ${formatDateTime(t.updated_at)}</span>` : ''}
+                </div>
+                <div class="script-card-actions">
+                    <button class="btn btn-outline" onclick="showDsTemplateDetail(${t.id})">📋 详情/版本</button>
+                    <button class="btn btn-primary" onclick="openDsTemplateModal(${t.id})">✏️ 编辑</button>
+                    <button class="btn btn-outline" onclick="toggleDsTemplateActive(${t.id})">${t.is_active ? '⏸️ 停用' : '▶️ 启用'}</button>
+                    <button class="btn btn-outline" onclick="exportDsTemplate(${t.id})">📥 导出JSON</button>
+                    <button class="btn btn-danger" onclick="deleteDsTemplate(${t.id})">🗑️ 删除</button>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    function openDsTemplateModal(templateId = null) {
+        dsEditingTemplateId = templateId;
+        document.getElementById('ds-tpl-id').value = '';
+        document.getElementById('ds-tpl-name').value = '';
+        document.getElementById('ds-tpl-ttype').value = 'venue';
+        document.getElementById('ds-tpl-version').value = '1.0';
+        document.getElementById('ds-tpl-active').value = 'true';
+        document.getElementById('ds-tpl-desc').value = '';
+        document.getElementById('ds-tpl-config').value = '';
+        document.getElementById('ds-tpl-changenote').value = '';
+        document.getElementById('ds-tpl-warn').style.display = 'none';
+
+        if (templateId) {
+            const t = dsTemplates.find(x => x.id === templateId);
+            if (t) {
+                document.getElementById('ds-tpl-modal-title').textContent = '编辑模板';
+                document.getElementById('ds-tpl-id').value = t.id;
+                document.getElementById('ds-tpl-name').value = t.name;
+                document.getElementById('ds-tpl-ttype').value = t.template_type;
+                document.getElementById('ds-tpl-version').value = t.version || '1.0';
+                document.getElementById('ds-tpl-active').value = String(t.is_active);
+                document.getElementById('ds-tpl-desc').value = t.description || '';
+                const cfg = typeof t.config_json === 'string' ? t.config_json : JSON.stringify(t.config_json || {}, null, 2);
+                document.getElementById('ds-tpl-config').value = cfg;
+            }
+        } else {
+            document.getElementById('ds-tpl-modal-title').textContent = '新建模板';
+            const sampleCfg = { venue: '{"venue_ids":[],"time_slots":[{"start":"09:00","end":"12:00"},{"start":"14:00","end":"17:00"}]}',
+                group: '{"groups":[{"name":"红队","members":[]},{"name":"蓝队","members":[]}]}',
+                checklist: '{"items":[{"name":"登录系统","required":true},{"name":"打开浏览器控制台","required":false}]}',
+                cleanup: '{"cleanup_types":["samples","temp_files","placeholders"],"delete_artifacts":true}' };
+            document.getElementById('ds-tpl-config').value = sampleCfg.venue;
+        }
+        openModal('ds-template-modal');
+    }
+
+    async function submitDsTemplate() {
+        const id = document.getElementById('ds-tpl-id').value;
+        const name = document.getElementById('ds-tpl-name').value.trim();
+        const template_type = document.getElementById('ds-tpl-ttype').value;
+        const version = document.getElementById('ds-tpl-version').value.trim() || '1.0';
+        const is_active = document.getElementById('ds-tpl-active').value === 'true';
+        const description = document.getElementById('ds-tpl-desc').value.trim();
+        const change_note = document.getElementById('ds-tpl-changenote').value.trim() || undefined;
+        let config_json;
+        try {
+            config_json = JSON.parse(document.getElementById('ds-tpl-config').value || '{}');
+        } catch (e) {
+            const warnEl = document.getElementById('ds-tpl-warn');
+            warnEl.innerHTML = `<h3>❌ 配置JSON格式错误: ${escapeHtml(e.message)}</h3>`;
+            warnEl.style.display = 'block';
+            return;
+        }
+
+        if (!name) { showToast('请填写模板名称', 'warning'); return; }
+
+        const payload = { name, template_type, version, is_active, description, config_json };
+        if (change_note) payload.change_note = change_note;
+
+        try {
+            if (id) {
+                await apiRequest(`${DS_API}/templates/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+                showToast('模板更新成功');
+            } else {
+                await apiRequest(`${DS_API}/templates`, { method: 'POST', body: JSON.stringify(payload) });
+                showToast('模板创建成功');
+            }
+            closeModal('ds-template-modal');
+            loadDsTemplates();
+        } catch (e) {
+            const warnEl = document.getElementById('ds-tpl-warn');
+            const errors = e.detail?.errors ? e.detail.errors.join('; ') : '';
+            warnEl.innerHTML = `<h3>❌ ${escapeHtml(e.detail?.message || e.detail || e.message || '保存失败')}</h3>${errors ? `<div style="margin-top:6px;color:#ef4444;">${escapeHtml(errors)}</div>` : ''}`;
+            warnEl.style.display = 'block';
+        }
+    }
+
+    async function toggleDsTemplateActive(tid) {
+        try {
+            const r = await apiRequest(`${DS_API}/templates/${tid}/toggle`, { method: 'POST' });
+            showToast('模板状态已切换为: ' + (r.is_active ? '启用' : '停用'));
+            loadDsTemplates();
+        } catch (e) { handleApiError(e); }
+    }
+
+    async function deleteDsTemplate(tid) {
+        if (!confirm('确定删除该模板？版本快照会保留，但新排期将不能再选它。')) return;
+        try {
+            await apiRequest(`${DS_API}/templates/${tid}`, { method: 'DELETE' });
+            showToast('模板已删除');
+            loadDsTemplates();
+        } catch (e) { handleApiError(e); }
+    }
+
+    async function exportDsTemplate(tid) {
+        try {
+            const data = await apiRequest(`${DS_API}/templates/${tid}/export`);
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `ds_template_${data.template_type}_${escapeHtml(data.name || tid)}.json`;
+            document.body.appendChild(a); a.click();
+            document.body.removeChild(a); window.URL.revokeObjectURL(url);
+            showToast('模板导出成功');
+        } catch (e) { handleApiError(e); }
+    }
+
+    function triggerDsTemplateImport() { document.getElementById('ds-tpl-import-file').click(); }
+
+    async function handleDsTemplateImportFile(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        try {
+            const formData = new FormData(); formData.append('file', file);
+            const token = getToken();
+            const vh = token ? { 'Authorization': `Bearer ${token}` } : {};
+            const valRes = await fetch(`${API_BASE}${DS_API}/templates/validate`, { method: 'POST', headers: vh, body: formData });
+            const validation = await valRes.json();
+
+            if (validation.blocking_errors && validation.blocking_errors.length) {
+                alert('导入被拦截：\n' + validation.blocking_errors.join('\n') +
+                    (validation.warnings && validation.warnings.length ? '\n\n同时有警告：\n' + validation.warnings.join('\n') : ''));
+                e.target.value = ''; return;
+            }
+
+            let cont = true;
+            if (validation.warnings && validation.warnings.length) {
+                cont = confirm('校验通过，存在以下警告：\n' + validation.warnings.join('\n') + '\n\n是否继续导入？');
+            }
+            if (!cont) { e.target.value = ''; return; }
+
+            const fd2 = new FormData(); fd2.append('file', file);
+            const impRes = await fetch(`${API_BASE}${DS_API}/templates/import`, { method: 'POST', headers: vh, body: fd2 });
+            if (!impRes.ok) {
+                const err = await impRes.json().catch(() => ({}));
+                throw new Error(err.detail || '导入失败');
+            }
+            const imported = await impRes.json();
+            showToast(`导入成功，模板ID=${imported.id}，已保存 ${imported.version_snapshot ? '版本快照' : ''}`);
+            loadDsTemplates();
+        } catch (e) { showToast('导入失败: ' + (e.message || e), 'error'); }
+        finally { e.target.value = ''; }
+    }
+
+    async function showDsTemplateDetail(tid) {
+        try {
+            const t = await apiRequest(`${DS_API}/templates/${tid}`);
+            const versions = await apiRequest(`${DS_API}/templates/${tid}/versions`);
+            document.getElementById('ds-tpldetail-title').textContent = `模板详情: ${t.name} v${t.version || '1.0'}`;
+
+            const cfgStr = typeof t.config_json === 'string' ? t.config_json : JSON.stringify(t.config_json || {}, null, 2);
+            let vsHtml = '';
+            if (versions && versions.length) {
+                vsHtml = `<div class="detail-section"><h3>📜 版本快照 (${versions.length})</h3>
+                    <div style="max-height:260px;overflow:auto;">${versions.map(v => `
+                    <div style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:8px;">
+                        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+                            <strong>v${escapeHtml(v.version)} ${escapeHtml(v.change_note || '')}</strong>
+                            <span style="color:#666;font-size:12px;">${formatDateTime(v.created_at)}</span>
+                        </div>
+                        <div style="font-size:12px;color:#666;">操作人: ${escapeHtml(v.created_by_name || '-')}</div>
+                        <pre style="background:#f3f4f6;padding:6px 8px;border-radius:4px;font-size:11px;max-height:100px;overflow:auto;margin-top:4px;">${escapeHtml(typeof v.config_snapshot==='string'?v.config_snapshot:JSON.stringify(v.config_snapshot||{}))}</pre>
+                    </div>`).join('')}</div></div>`;
+            }
+
+            document.getElementById('ds-tpldetail-body').innerHTML = `
+                <div class="detail-section">
+                    <h3>📝 基本信息</h3>
+                    <div class="detail-row"><span>类型:</span><strong>${DSTypeIcon[t.template_type]} ${DSTypeLabel[t.template_type]}</strong></div>
+                    <div class="detail-row"><span>版本:</span><code>${escapeHtml(t.version || '1.0')}</code></div>
+                    <div class="detail-row"><span>状态:</span><span class="status-badge ${t.is_active ? 'status-batch-ready' : 'status-batch-failed'}">${t.is_active ? '启用' : '停用'}</span></div>
+                    <div class="detail-row"><span>描述:</span>${escapeHtml(t.description || '-')}</div>
+                    <div class="detail-row"><span>创建:</span>${formatDateTime(t.created_at)} by ${escapeHtml(t.created_by_name || '-')}</div>
+                </div>
+                <div class="detail-section"><h3>⚙️ 配置</h3>
+                    <pre style="background:#f3f4f6;padding:10px 12px;border-radius:6px;font-size:12px;max-height:280px;overflow:auto;">${escapeHtml(cfgStr)}</pre>
+                </div>${vsHtml}`;
+            document.getElementById('ds-tpldetail-footer').innerHTML = `<button class="btn btn-outline modal-close-btn">关闭</button>`;
+            bindModalClose(); openModal('ds-template-detail-modal');
+        } catch (e) { handleApiError(e); }
+    }
+
+    async function loadDsSchedules() {
+        try {
+            const params = new URLSearchParams();
+            if (dsScheduleFilter.keyword) params.append('keyword', dsScheduleFilter.keyword);
+            if (dsScheduleFilter.status) params.append('status', dsScheduleFilter.status);
+            if (dsScheduleFilter.venue_id) params.append('venue_id', dsScheduleFilter.venue_id);
+            if (dsScheduleFilter.from_date) params.append('from_date', dsScheduleFilter.from_date);
+            if (dsScheduleFilter.to_date) params.append('to_date', dsScheduleFilter.to_date);
+
+            dsSchedules = await apiRequest(`${DS_API}/schedules?${params.toString()}`);
+            renderDsSchedules();
+            renderDsCalendar();
+        } catch (e) { showToast('加载排期失败: ' + (e.detail?.message || e.detail || e.message), 'error'); }
+    }
+
+    function renderDsSchedules() {
+        const listEl = document.getElementById('ds-schedule-list');
+        setDsElText('ds-schedule-count', `共 ${dsSchedules.length} 条`);
+
+        if (dsSchedules.length === 0) {
+            listEl.innerHTML = '<div style="text-align:center;padding:40px;color:#999;">暂无排期，点击"新建排期"或"批量生成"开始</div>';
+            return;
+        }
+
+        listEl.innerHTML = dsSchedules.map(s => {
+            const stCls = DSScheduleStatusClass[s.status] || 'status-batch-pending';
+            const stLabel = DSScheduleStatusLabel[s.status] || s.status;
+            const conflict = s.conflicts && s.conflicts.length;
+            return `
+            <div class="script-card ${conflict ? 'schedule-card-conflict' : ''}">
+                <div class="script-card-header">
+                    <span class="script-card-title">📅 ${escapeHtml(s.title)}
+                        <span class="status-badge ${stCls}" style="font-size:12px;margin-left:8px;">${stLabel}</span>
+                        <span style="font-size:12px;margin-left:8px;">#${escapeHtml(s.schedule_no || s.id)}</span>
+                    </span>
+                    <span style="font-size:12px;color:#666;">${escapeHtml(s.venue_name || '-')}</span>
+                </div>
+                <div class="script-card-meta">
+                    <span>🗓 ${escapeHtml(s.schedule_date || '-')}</span>
+                    <span>⏰ ${formatDsTimeHHMM(s.start_time)} ~ ${formatDsTimeHHMM(s.end_time)}</span>
+                    <span>👤 创建人: ${escapeHtml(s.created_by_name || '-')}</span>
+                    ${s.batch_id ? `<span>📦 批次: ${escapeHtml(s.batch_id)}</span>` : ''}
+                </div>
+                ${conflict ? `<div style="background:#fef2f2;color:#b91c1c;padding:6px 10px;border-radius:4px;font-size:12px;margin:6px 0;">⚠️ ${s.conflicts.length}个冲突: ${escapeHtml(s.conflicts.map(c=>c.reason||'').slice(0,2).join(' / '))}</div>` : ''}
+                ${s.template_snapshot_fields ? `<div style="font-size:12px;color:#6b7280;">📸 快照隔离: ${s.template_snapshot_fields.map(f=>escapeHtml(f)).join(', ')}</div>` : ''}
+                <div class="script-card-actions">
+                    <button class="btn btn-outline" onclick="showDsScheduleDetail(${s.id})">📋 详情</button>
+                    ${s.status === 'draft' ? `<button class="btn btn-outline" onclick="openDsScheduleModal(${s.id})">✏️ 编辑</button>` : ''}
+                    ${s.status === 'draft' ? `<button class="btn btn-success" onclick="dsPublishSchedule(${s.id})">📢 发布</button>` : ''}
+                    ${s.status === 'published' ? `<button class="btn btn-warning" onclick="dsLockSchedule(${s.id})">🔒 锁定</button>` : ''}
+                    ${s.status === 'locked' ? `<button class="btn btn-outline" onclick="dsUnlockSchedule(${s.id})">🔓 解锁</button>` : ''}
+                    ${['draft', 'published'].includes(s.status) ? `<button class="btn btn-danger" onclick="dsCancelScheduleConfirm(${s.id})">⏹ 撤销</button>` : ''}
+                    <button class="btn btn-outline" onclick="dsCopyScheduleConfirm(${s.id})">📑 复制</button>
+                    ${['published', 'locked', 'executing'].includes(s.status) && !s.batch_id ? `<button class="btn btn-primary" onclick="dsGenerateBatch(${s.id})">▶️ 生成批次</button>` : ''}
+                    ${s.batch_id ? `<button class="btn btn-outline" onclick="openBatchDetailFromSchedule('${escapeHtml(s.batch_id)}')">📦 查看批次</button>` : ''}
+                    ${['draft', 'cancelled'].includes(s.status) ? `<button class="btn btn-danger" onclick="dsDeleteSchedule(${s.id})">🗑️ 删除</button>` : ''}
+                    ${s.status === 'cancelled' ? `<button class="btn btn-outline" onclick="dsCleanupSchedule(${s.id})">🧹 清理资源</button>` : ''}
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    function openBatchDetailFromSchedule(bid) { showBatchDetail(bid); }
+
+    function renderDsCalendar() {
+        const calEl = document.getElementById('ds-calendar');
+        if (!calEl) return;
+
+        const y = dsCalendarDate.getFullYear();
+        const m = dsCalendarDate.getMonth();
+        const first = new Date(y, m, 1);
+        const last = new Date(y, m + 1, 0);
+        const startDow = first.getDay();
+        const daysInMonth = last.getDate();
+
+        document.getElementById('ds-cal-title').textContent = `${y}年${m + 1}月`;
+
+        let html = '<div class="calendar-grid-header">日一二三四五六</div><div class="calendar-grid">';
+        for (let i = 0; i < startDow; i++) html += '<div class="calendar-cell calendar-cell-empty"></div>';
+
+        const pad = n => String(n).padStart(2, '0');
+        const todayStr = new Date();
+        const todayStrS = `${todayStr.getFullYear()}-${pad(todayStr.getMonth() + 1)}-${pad(todayStr.getDate())}`;
+
+        for (let d = 1; d <= daysInMonth; d++) {
+            const ds = `${y}-${pad(m + 1)}-${pad(d)}`;
+            const daySched = dsSchedules.filter(s => s.schedule_date === ds);
+            const hasConflict = daySched.some(s => s.conflicts && s.conflicts.length);
+            html += `<div class="calendar-cell ${ds === todayStrS ? 'calendar-cell-today' : ''} ${hasConflict ? 'calendar-cell-conflict' : ''}" onclick="dsSelectCalendarDay('${ds}')">
+                <div class="calendar-cell-date">${d}</div>
+                <div class="calendar-cell-events">
+                    ${daySched.slice(0, 3).map(s => {
+                        const cls = DSScheduleStatusClass[s.status] || 'status-batch-pending';
+                        return `<div class="cal-event cal-event-${s.status}" title="${escapeHtml(s.title)}&#10;${formatDsTimeHHMM(s.start_time)}-${formatDsTimeHHMM(s.end_time)}&#10;${escapeHtml(s.venue_name||'')}">
+                            <span class="cal-event-time">${formatDsTimeHHMM(s.start_time)}</span> ${escapeHtml(s.title.length > 6 ? s.title.substring(0, 6) + '…' : s.title)}
+                        </div>`;
+                    }).join('')}
+                    ${daySched.length > 3 ? `<div class="cal-event-more">+${daySched.length - 3} 更多</div>` : ''}
+                </div>
+            </div>`;
+        }
+        html += '</div>';
+        calEl.innerHTML = html;
+    }
+
+    function dsPrevMonth() { dsCalendarDate.setMonth(dsCalendarDate.getMonth() - 1); renderDsCalendar(); }
+    function dsNextMonth() { dsCalendarDate.setMonth(dsCalendarDate.getMonth() + 1); renderDsCalendar(); }
+    function dsGoToday() { dsCalendarDate = new Date(); renderDsCalendar(); }
+    function dsSelectCalendarDay(dateStr) {
+        if (document.getElementById('ds-cal-start')) document.getElementById('ds-cal-start').value = dateStr;
+        if (document.getElementById('ds-cal-end')) document.getElementById('ds-cal-end').value = dateStr;
+        dsScheduleFilter.from_date = dateStr;
+        dsScheduleFilter.to_date = dateStr;
+        renderDsSchedules();
+    }
+
+    function openDsScheduleModal(scheduleId = null) {
+        dsEditingScheduleId = scheduleId;
+        document.getElementById('ds-sched-warn').style.display = 'none';
+        document.getElementById('ds-sched-id').value = '';
+        document.getElementById('ds-sched-title').value = '';
+        document.getElementById('ds-sched-notes').value = '';
+
+        const today = new Date(); const pad = n => String(n).padStart(2, '0');
+        document.getElementById('ds-sched-date').value = scheduleId ? '' : `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+        document.getElementById('ds-sched-start').value = '09:00';
+        document.getElementById('ds-sched-end').value = '12:00';
+        document.getElementById('ds-sched-venue-tpl').value = '';
+        document.getElementById('ds-sched-group-tpl').value = '';
+        document.getElementById('ds-sched-check-tpl').value = '';
+        document.getElementById('ds-sched-clean-tpl').value = '';
+        document.getElementById('ds-sched-script').value = '';
+        document.getElementById('ds-sched-venue').value = '';
+
+        if (scheduleId) {
+            const s = dsSchedules.find(x => x.id === scheduleId);
+            if (s) {
+                document.getElementById('ds-sched-modal-title').textContent = '编辑排期';
+                document.getElementById('ds-sched-id').value = s.id;
+                document.getElementById('ds-sched-title').value = s.title;
+                document.getElementById('ds-sched-date').value = s.schedule_date;
+                document.getElementById('ds-sched-start').value = s.start_time;
+                document.getElementById('ds-sched-end').value = s.end_time;
+                document.getElementById('ds-sched-venue').value = s.venue_id || '';
+                document.getElementById('ds-sched-venue-tpl').value = s.venue_template_id || '';
+                document.getElementById('ds-sched-group-tpl').value = s.group_template_id || '';
+                document.getElementById('ds-sched-check-tpl').value = s.checklist_template_id || '';
+                document.getElementById('ds-sched-clean-tpl').value = s.cleanup_template_id || '';
+                document.getElementById('ds-sched-script').value = s.script_id || '';
+                document.getElementById('ds-sched-notes').value = s.notes || '';
+                if (s.status !== 'draft') {
+                    showToast('已发布的排期仅能修改标题和备注，其他字段需先撤销', 'warning');
+                }
+            }
+        } else {
+            document.getElementById('ds-sched-modal-title').textContent = '新建排期';
+        }
+        openModal('ds-schedule-modal');
+    }
+
+    async function submitDsSchedule() {
+        const id = document.getElementById('ds-sched-id').value;
+        const title = document.getElementById('ds-sched-title').value.trim();
+        if (!title) { showToast('请填写排期标题', 'warning'); return; }
+
+        const payload = {
+            title,
+            schedule_date: document.getElementById('ds-sched-date').value,
+            start_time: document.getElementById('ds-sched-start').value,
+            end_time: document.getElementById('ds-sched-end').value,
+            venue_id: Number(document.getElementById('ds-sched-venue').value) || null,
+            venue_template_id: Number(document.getElementById('ds-sched-venue-tpl').value) || null,
+            group_template_id: Number(document.getElementById('ds-sched-group-tpl').value) || null,
+            checklist_template_id: Number(document.getElementById('ds-sched-check-tpl').value) || null,
+            cleanup_template_id: Number(document.getElementById('ds-sched-clean-tpl').value) || null,
+            script_id: Number(document.getElementById('ds-sched-script').value) || null,
+            notes: document.getElementById('ds-sched-notes').value.trim() || null
+        };
+
+        try {
+            if (id) {
+                await apiRequest(`${DS_API}/schedules/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+                showToast('排期更新成功');
+            } else {
+                await apiRequest(`${DS_API}/schedules`, { method: 'POST', body: JSON.stringify(payload) });
+                showToast('排期创建成功');
+            }
+            closeModal('ds-schedule-modal');
+            loadDsSchedules();
+        } catch (e) {
+            const warnEl = document.getElementById('ds-sched-warn');
+            const errors = e.detail?.errors ? e.detail.errors.join('; ') : '';
+            let conflictsHtml = '';
+            if (e.detail?.conflicts && e.detail.conflicts.length) {
+                conflictsHtml = `<div style="margin-top:6px;color:#ef4444;"><strong>冲突详情:</strong><ul style="margin:4px 0 0 16px;">${e.detail.conflicts.map(c => `<li>${escapeHtml(c.reason||'未知冲突')} (${escapeHtml(c.type||'')})</li>`).join('')}</ul></div>`;
+            }
+            warnEl.innerHTML = `<h3>❌ ${escapeHtml(e.detail?.message || e.detail || e.message || '保存失败')}</h3>${errors ? `<div style="margin-top:6px;color:#ef4444;">${escapeHtml(errors)}</div>` : ''}${conflictsHtml}`;
+            warnEl.style.display = 'block';
+        }
+    }
+
+    async function dsCheckConflict() {
+        const venueId = Number(document.getElementById('ds-sched-venue').value) || null;
+        const d = document.getElementById('ds-sched-date').value;
+        const st = document.getElementById('ds-sched-start').value;
+        const et = document.getElementById('ds-sched-end').value;
+        if (!d || !st || !et || !venueId) { showToast('请先选择日期、时间和场地再检测', 'warning'); return; }
+        const sid = document.getElementById('ds-sched-id').value || null;
+        try {
+            const r = await apiRequest(`${DS_API}/schedules/check-conflicts?schedule_date=${d}&start_time=${st}&end_time=${et}&venue_id=${venueId}${sid ? '&exclude_schedule_id=' + sid : ''}`);
+            const warnEl = document.getElementById('ds-sched-warn');
+            if (r.ok) {
+                warnEl.innerHTML = `<h3 style="color:#059669;">✅ 检测通过，无冲突 (检测了 ${r.checked_scopes?.join(', ') || '排期+预约+封场'})</h3>`;
+            } else {
+                warnEl.innerHTML = `<h3>⚠️ 检测到 ${r.conflicts?.length || 0} 个冲突</h3>
+                    <ul style="margin:6px 0 0 16px;color:#ef4444;">${(r.conflicts || []).map(c => `<li>${escapeHtml(c.reason || '未知')} [${escapeHtml(c.type || '')}]</li>`).join('')}</ul>`;
+            }
+            warnEl.style.display = 'block';
+        } catch (e) { handleApiError(e); }
+    }
+
+    async function showDsScheduleDetail(sid) {
+        try {
+            const s = await apiRequest(`${DS_API}/schedules/${sid}`);
+            document.getElementById('ds-detail-modal-title').textContent = `排期详情: ${s.title} #${s.schedule_no || s.id}`;
+            const snap = typeof s.template_snapshot === 'string' ? s.template_snapshot : JSON.stringify(s.template_snapshot || {}, null, 2);
+            const stCls = DSScheduleStatusClass[s.status] || 'status-batch-pending';
+            const stLabel = DSScheduleStatusLabel[s.status] || s.status;
+
+            let membersHtml = '';
+            if (s.members && s.members.length) {
+                membersHtml = `<div class="detail-section"><h3>👥 成员 (${s.members.length})</h3>
+                    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;">
+                    ${s.members.map(m => `<div style="padding:6px 8px;background:#f3f4f6;border-radius:4px;font-size:13px;">
+                        ${escapeHtml(m.role_in_schedule || '成员')}: <strong>${escapeHtml(m.user_full_name || m.user_username || '?')}</strong>
+                        ${m.group_name ? ` <span style="color:#666;">[${escapeHtml(m.group_name)}]</span>` : ''}
+                        ${m.user_email ? `<div style="font-size:11px;color:#888;">${escapeHtml(m.user_email)}</div>` : ''}
+                    </div>`).join('')}</div></div>`;
+            }
+            let conflictHtml = '';
+            if (s.conflicts && s.conflicts.length) {
+                conflictHtml = `<div class="detail-section"><h3 style="color:#ef4444;">⚠️ 冲突 (${s.conflicts.length})</h3>
+                    ${s.conflicts.map(c => `<div style="padding:8px 10px;background:#fef2f2;border-radius:4px;margin-bottom:6px;">
+                        <strong>[${escapeHtml(c.type || '')}]</strong> ${escapeHtml(c.reason || '')}
+                        ${c.with_schedule_no ? `<div style="font-size:11px;color:#b91c1c;margin-top:2px;">撞车排期: #${escapeHtml(c.with_schedule_no)}</div>` : ''}
+                    </div>`).join('')}</div>`;
+            }
+            let auditHtml = '';
+            if (s.recent_audits && s.recent_audits.length) {
+                auditHtml = `<div class="detail-section"><h3>📝 近期变更 (${s.recent_audits.length})</h3>
+                    ${s.recent_audits.map(a => `<div style="padding:6px 10px;border-left:3px solid #3b82f6;background:#eff6ff;border-radius:0 4px 4px 0;margin-bottom:4px;">
+                        <div style="font-size:12px;"><strong>${escapeHtml(a.action_name || a.action || '')}</strong> by ${escapeHtml(a.operator_name || '-')} @ ${formatDateTime(a.created_at)}</div>
+                        ${a.old_value ? `<div style="font-size:11px;color:#666;margin-top:2px;"><strong>旧值:</strong> ${escapeHtml(JSON.stringify(a.old_value).substring(0,200))}</div>` : ''}
+                        ${a.new_value ? `<div style="font-size:11px;color:#10b981;margin-top:2px;"><strong>新值:</strong> ${escapeHtml(JSON.stringify(a.new_value).substring(0,200))}</div>` : ''}
+                        ${a.ip_address ? `<div style="font-size:11px;color:#999;">IP: ${escapeHtml(a.ip_address)}</div>` : ''}
+                    </div>`).join('')}</div>`;
+            }
+            let artifactsHtml = '';
+            if (s.downloads && s.downloads.length) {
+                artifactsHtml = `<div class="detail-section"><h3>📥 下载摘要</h3>${s.downloads.map(d => `<a href="${escapeHtml(d.url)}" target="_blank" class="btn btn-outline" style="display:inline-block;margin:2px;">${escapeHtml(d.title)}</a>`).join('')}</div>`;
+            }
+            let resultHtml = '';
+            if (s.execution_result) {
+                resultHtml = `<div class="detail-section"><h3>📊 执行结果</h3>
+                    <pre style="background:#f3f4f6;padding:10px;border-radius:6px;font-size:12px;max-height:180px;overflow:auto;">${escapeHtml(typeof s.execution_result==='string'?s.execution_result:JSON.stringify(s.execution_result,null,2))}</pre></div>`;
+            }
+
+            document.getElementById('ds-detail-body').innerHTML = `
+                <div class="detail-section">
+                    <div class="detail-row"><span>状态:</span><span class="status-badge ${stCls}">${stLabel}</span></div>
+                    <div class="detail-row"><span>日期:</span><strong>${escapeHtml(s.schedule_date || '-')}</strong></div>
+                    <div class="detail-row"><span>时段:</span>${formatDsTimeHHMM(s.start_time)} ~ ${formatDsTimeHHMM(s.end_time)}</div>
+                    <div class="detail-row"><span>场地:</span>${escapeHtml(s.venue_name || '-')}</div>
+                    <div class="detail-row"><span>创建:</span>${formatDateTime(s.created_at)} by ${escapeHtml(s.created_by_name || '-')}</div>
+                    ${s.batch_id ? `<div class="detail-row"><span>执行批次:</span><a href="javascript:void(0)" onclick="openBatchDetailFromSchedule('${escapeHtml(s.batch_id)}')">${escapeHtml(s.batch_id)}</a></div>` : ''}
+                    ${s.published_at ? `<div class="detail-row"><span>发布时间:</span>${formatDateTime(s.published_at)}</div>` : ''}
+                    ${s.notes ? `<div class="detail-row"><span>备注:</span>${escapeHtml(s.notes)}</div>` : ''}
+                </div>
+                ${s.template_snapshot ? `<div class="detail-section"><h3>📸 模板快照(发布时隔离，已不受后续模板改动影响)</h3>
+                    <pre style="background:#f0fdf4;padding:10px;border-radius:6px;font-size:11px;max-height:200px;overflow:auto;">${escapeHtml(snap)}</pre></div>` : ''}
+                ${membersHtml}${conflictHtml}${resultHtml}${artifactsHtml}${auditHtml}`;
+
+            const isAdmin = currentUser?.role === 'admin';
+            let footerBtns = `<button class="btn btn-outline modal-close-btn">关闭</button>`;
+            if (isAdmin) {
+                if (s.status === 'draft') footerBtns += `<button class="btn btn-success" onclick="dsPublishSchedule(${s.id});closeModal('ds-schedule-detail-modal');">📢 发布</button>`;
+                if (s.status === 'published') footerBtns += `<button class="btn btn-warning" onclick="dsLockSchedule(${s.id});closeModal('ds-schedule-detail-modal');">🔒 锁定</button>`;
+                if (s.status === 'locked') footerBtns += `<button class="btn btn-outline" onclick="dsUnlockSchedule(${s.id});closeModal('ds-schedule-detail-modal');">🔓 解锁</button>`;
+                if (['draft', 'published'].includes(s.status)) footerBtns += `<button class="btn btn-danger" onclick="dsCancelScheduleConfirm(${s.id});closeModal('ds-schedule-detail-modal');">⏹ 撤销</button>`;
+                if (['published', 'locked', 'executing'].includes(s.status) && !s.batch_id) footerBtns += `<button class="btn btn-primary" onclick="dsGenerateBatch(${s.id});closeModal('ds-schedule-detail-modal');">▶️ 生成批次</button>`;
+                footerBtns += `<button class="btn btn-outline" onclick="dsCopyScheduleConfirm(${s.id});closeModal('ds-schedule-detail-modal');">📑 复制</button>`;
+                if (s.status === 'cancelled') footerBtns += `<button class="btn btn-danger" onclick="dsCleanupSchedule(${s.id});closeModal('ds-schedule-detail-modal');">🧹 清理资源</button>`;
+            }
+            document.getElementById('ds-detail-footer').innerHTML = footerBtns;
+            bindModalClose(); openModal('ds-schedule-detail-modal');
+        } catch (e) { handleApiError(e); }
+    }
+
+    async function dsPublishSchedule(sid) {
+        try {
+            await apiRequest(`${DS_API}/schedules/${sid}/publish`, { method: 'POST' });
+            showToast('排期已发布，模板快照已保存');
+            loadDsSchedules();
+        } catch (e) { handleApiError(e); }
+    }
+    async function dsLockSchedule(sid) {
+        try { await apiRequest(`${DS_API}/schedules/${sid}/lock`, { method: 'POST' }); showToast('排期已锁定'); loadDsSchedules(); }
+        catch (e) { handleApiError(e); }
+    }
+    async function dsUnlockSchedule(sid) {
+        try { await apiRequest(`${DS_API}/schedules/${sid}/unlock`, { method: 'POST' }); showToast('排期已解锁'); loadDsSchedules(); }
+        catch (e) { handleApiError(e); }
+    }
+    function dsCancelScheduleConfirm(sid) {
+        const s = dsSchedules.find(x => x.id === sid); dsCancelSchedId = sid;
+        document.getElementById('ds-cancel-hint').textContent = s ? `确定要撤销 "${s.title}" (#${s.schedule_no||sid}) 吗？所有关联资源(样本数据、占位记录)将被清理，该操作不可恢复。` : '确定撤销？';
+        document.getElementById('ds-cancel-reason').value = '';
+        openModal('ds-cancel-modal');
+    }
+    async function dsCancelScheduleSubmit() {
+        if (!dsCancelSchedId) return;
+        const reason = document.getElementById('ds-cancel-reason').value.trim();
+        try {
+            const r = await apiRequest(`${DS_API}/schedules/${dsCancelSchedId}/cancel`, {
+                method: 'POST', body: JSON.stringify({ reason: reason || null })
+            });
+            showToast(`排期已撤销，清理结果：占位${r.cleanup_result?.placeholders_deleted||0}条，临时文件${r.cleanup_result?.temp_files_deleted||0}个，样本${r.cleanup_result?.samples_cleared||0}条`);
+            closeModal('ds-cancel-modal');
+            dsCancelSchedId = null;
+            loadDsSchedules();
+        } catch (e) { handleApiError(e); }
+    }
+    function dsCopyScheduleConfirm(sid) {
+        const s = dsSchedules.find(x => x.id === sid); dsCopySchedId = sid;
+        document.getElementById('ds-copy-hint').textContent = s ? `将复制排期 "${s.title}" (#${s.schedule_no||sid})，系统会自动分配新的唯一编号。` : '';
+        document.getElementById('ds-copy-date').value = s?.schedule_date || '';
+        openModal('ds-copy-modal');
+    }
+    async function dsCopyScheduleSubmit() {
+        if (!dsCopySchedId) return;
+        const newDate = document.getElementById('ds-copy-date').value || null;
+        try {
+            const r = await apiRequest(`${DS_API}/schedules/${dsCopySchedId}/copy`, {
+                method: 'POST', body: JSON.stringify(newDate ? { new_schedule_date: newDate } : {})
+            });
+            showToast(`复制成功！新排期编号: ${r.new_schedule_no} (ID=${r.new_schedule_id})`);
+            closeModal('ds-copy-modal');
+            dsCopySchedId = null;
+            loadDsSchedules();
+        } catch (e) { handleApiError(e); }
+    }
+    async function dsGenerateBatch(sid) {
+        try {
+            const r = await apiRequest(`${DS_API}/schedules/${sid}/generate-batch`, { method: 'POST' });
+            showToast(`执行批次已生成: ${r.batch_id} (${r.status})`);
+            loadDsSchedules();
+        } catch (e) { handleApiError(e); }
+    }
+    async function dsCleanupSchedule(sid) {
+        if (!confirm('清理该排期的残余资源(样本、临时文件、占位记录)？')) return;
+        try {
+            const r = await apiRequest(`${DS_API}/schedules/${sid}/cleanup`, { method: 'POST' });
+            showToast(`清理完成: 占位${r.placeholders_deleted||0}，文件${r.temp_files_deleted||0}，样本${r.samples_cleared||0}`);
+            loadDsSchedules();
+        } catch (e) { handleApiError(e); }
+    }
+    async function dsDeleteSchedule(sid) {
+        if (!confirm('确定删除此排期？(建议先撤销，会联动清理)')) return;
+        try {
+            await apiRequest(`${DS_API}/schedules/${sid}`, { method: 'DELETE' });
+            showToast('排期已删除');
+            loadDsSchedules();
+        } catch (e) { handleApiError(e); }
+    }
+
+    async function loadDsMine() {
+        try {
+            dsMineSchedules = await apiRequest(`${DS_API}/schedules/mine`);
+            renderDsMine();
+        } catch (e) { showToast('加载我的排期失败: ' + (e.detail?.message || e.detail || e.message), 'error'); }
+    }
+
+    function renderDsMine() {
+        const listEl = document.getElementById('ds-mine-list');
+        setDsElText('ds-mine-count', `共 ${dsMineSchedules.length} 场`);
+        if (dsMineSchedules.length === 0) {
+            listEl.innerHTML = '<div style="text-align:center;padding:40px;color:#999;">暂无您参与的排期</div>';
+            return;
+        }
+        listEl.innerHTML = dsMineSchedules.map(s => {
+            const stCls = DSScheduleStatusClass[s.status] || 'status-batch-pending';
+            const stLabel = DSScheduleStatusLabel[s.status] || s.status;
+            let clHtml = '';
+            if (s.member_checklist && s.member_checklist.length) {
+                clHtml = `<div style="margin-top:6px;"><h4 style="font-size:12px;margin:4px 0;">✅ 准备清单 (点击勾选)</h4>
+                    ${s.member_checklist.map((c,i) => `
+                    <label style="display:block;font-size:12px;padding:3px 0;">
+                        <input type="checkbox" ${c.checked?'checked':''} onchange="dsMineCheckItem(${s.id},${i},this.checked)" ${s.status==='cancelled'||s.status==='completed'?'disabled':''}>
+                        <strong>${escapeHtml(c.name)}</strong> ${c.required?'<span style="color:#ef4444;">*</span>':''}
+                        ${c.description?`<span style="color:#666;"> - ${escapeHtml(c.description)}</span>`:''}
+                    </label>`).join('')}</div>`;
+            }
+            let dwHtml = '';
+            if (s.downloads && s.downloads.length) {
+                dwHtml = `<div style="margin-top:6px;font-size:12px;">📥 ${s.downloads.map(d => `<a href="${escapeHtml(d.url)}" target="_blank" style="margin-right:8px;color:#2563eb;">${escapeHtml(d.title)}</a>`).join('')}</div>`;
+            }
+            let resHtml = '';
+            if (s.execution_result) {
+                resHtml = `<div style="margin-top:6px;background:#f0fdf4;padding:6px 8px;border-radius:4px;font-size:11px;">📊 ${escapeHtml(typeof s.execution_result==='string'?s.execution_result:JSON.stringify(s.execution_result))}</div>`;
+            }
+            return `<div class="script-card">
+                <div class="script-card-header">
+                    <span class="script-card-title">📍 ${escapeHtml(s.title)}<span class="status-badge ${stCls}" style="font-size:12px;margin-left:8px;">${stLabel}</span></span>
+                    <span style="font-size:12px;color:#666;">#${escapeHtml(s.schedule_no || s.id)}</span>
+                </div>
+                <div class="script-card-meta">
+                    <span>🗓 ${escapeHtml(s.schedule_date||'-')}</span>
+                    <span>⏰ ${formatDsTimeHHMM(s.start_time)}~${formatDsTimeHHMM(s.end_time)}</span>
+                    <span>🏢 ${escapeHtml(s.venue_name||'-')}</span>
+                    <span>👥 ${escapeHtml(s.my_role || '成员')}${s.my_group ? ` [${escapeHtml(s.my_group)}]` : ''}</span>
+                </div>
+                ${clHtml}${resHtml}${dwHtml}
+                ${s.batch_id ? `<div class="script-card-actions" style="margin-top:8px;"><button class="btn btn-primary" onclick="openBatchDetailFromSchedule('${escapeHtml(s.batch_id)}')">▶️ 进入执行</button></div>` : ''}
+            </div>`;
+        }).join('');
+    }
+
+    async function dsMineCheckItem(sid, idx, checked) {
+        try {
+            await apiRequest(`${DS_API}/schedules/mine/checklist/${idx}`, {
+                method: 'POST', body: JSON.stringify({ checked })
+            });
+        } catch (e) { handleApiError(e); }
+    }
+
+    async function loadDsAudit() {
+        try {
+            const params = new URLSearchParams();
+            if (dsAuditFilter.resource_type) params.append('resource_type', dsAuditFilter.resource_type);
+            if (dsAuditFilter.action) params.append('action', dsAuditFilter.action);
+            if (dsAuditFilter.operator) params.append('operator_keyword', dsAuditFilter.operator);
+            if (dsAuditFilter.from_date) params.append('from_date', dsAuditFilter.from_date);
+            if (dsAuditFilter.to_date) params.append('to_date', dsAuditFilter.to_date);
+
+            dsAuditLogs = await apiRequest(`${DS_API}/audit-logs?${params.toString()}`);
+            renderDsAudit();
+        } catch (e) { showToast('加载审计日志失败', 'error'); }
+    }
+
+    function renderDsAudit() {
+        const listEl = document.getElementById('ds-audit-list');
+        setDsElText('ds-audit-count', `共 ${dsAuditLogs.length} 条`);
+        if (dsAuditLogs.length === 0) { listEl.innerHTML = '<div style="text-align:center;padding:40px;color:#999;">暂无审计日志</div>'; return; }
+        listEl.innerHTML = dsAuditLogs.map(a => `
+            <div style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:8px;">
+                <div style="display:flex;justify-content:space-between;margin-bottom:4px;flex-wrap:wrap;">
+                    <span><strong style="color:#3b82f6;">${escapeHtml(a.action_name || a.action || '')}</strong>
+                        <span style="color:#666;">[${escapeHtml(a.resource_type || '')}]</span>
+                        ${a.resource_id ? `<code>#${escapeHtml(a.resource_id)}</code>` : ''}
+                        ${a.resource_title ? ` - ${escapeHtml(a.resource_title)}` : ''}
+                    </span>
+                    <span style="font-size:12px;color:#666;">${formatDateTime(a.created_at)} · ${escapeHtml(a.operator_name || '-')} · ${escapeHtml(a.ip_address || '-')}</span>
+                </div>
+                ${a.old_value ? `<div style="font-size:11px;color:#9ca3af;">旧: ${escapeHtml(JSON.stringify(a.old_value).substring(0,200))}</div>` : ''}
+                ${a.new_value ? `<div style="font-size:11px;color:#10b981;">新: ${escapeHtml(JSON.stringify(a.new_value).substring(0,200))}</div>` : ''}
+                ${a.reason ? `<div style="font-size:12px;color:#ef4444;">原因: ${escapeHtml(a.reason)}</div>` : ''}
+            </div>`).join('');
+    }
+
+    async function dsTriggerRecover() {
+        if (!confirm('手动触发待执行排期的恢复检测(通常服务启动时自动执行)？')) return;
+        try {
+            const r = await apiRequest(`${DS_API}/schedules/recover`, { method: 'POST' });
+            showToast(`恢复完成: 共 ${r.items?.length || 0} 条，已恢复 ${r.recovered_count || 0} 条` + (r.message ? `\n${r.message}` : ''));
+            loadDsSchedules();
+        } catch (e) { handleApiError(e); }
+    }
+
+    function openDsBatchModal() {
+        document.getElementById('ds-batch-warn').style.display = 'none';
+        const today = new Date(); const pad = n => String(n).padStart(2, '0');
+        document.getElementById('ds-batch-start').value = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+        const end = new Date(today); end.setDate(end.getDate() + 13);
+        document.getElementById('ds-batch-end').value = `${end.getFullYear()}-${pad(end.getMonth() + 1)}-${pad(end.getDate())}`;
+        openModal('ds-batch-modal');
+    }
+
+    async function submitDsBatchGenerate() {
+        const venue_tpl_id = Number(document.getElementById('ds-batch-venue-tpl').value) || null;
+        const start = document.getElementById('ds-batch-start').value;
+        const end = document.getElementById('ds-batch-end').value;
+        const prefix = document.getElementById('ds-batch-prefix').value.trim();
+        const group_tpl_id = Number(document.getElementById('ds-batch-group-tpl').value) || null;
+        const script_id = Number(document.getElementById('ds-batch-script').value) || null;
+        if (!venue_tpl_id || !start || !end) { showToast('请填写场地模板和日期范围', 'warning'); return; }
+        try {
+            const r = await apiRequest(`${DS_API}/schedules/batch-generate`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    venue_template_id: venue_tpl_id,
+                    start_date: start,
+                    end_date: end,
+                    base_title: prefix || '演练',
+                    group_template_id: group_tpl_id,
+                    drill_script_id: script_id,
+                    exclude_weekends: true
+                })
+            });
+            showToast(`批量生成完成: 成功${r.created_count||0}，跳过冲突${r.skipped_conflicts||0}`);
+            closeModal('ds-batch-modal');
+            loadDsSchedules();
+        } catch (e) {
+            const warn = document.getElementById('ds-batch-warn');
+            warn.innerHTML = `<h3>❌ ${escapeHtml(e.detail?.message || e.detail || e.message || '生成失败')}</h3>`;
+            warn.style.display = 'block';
+        }
+    }
+
+    document.querySelectorAll('.ds-subtab').forEach(t => {
+        t.addEventListener('click', () => switchDsSubtab(t.dataset.subtab));
+    });
+    document.getElementById('ds-tpl-new-btn')?.addEventListener('click', () => openDsTemplateModal());
+    document.getElementById('ds-tpl-submit-btn')?.addEventListener('click', submitDsTemplate);
+    document.getElementById('ds-tpl-import-btn')?.addEventListener('click', triggerDsTemplateImport);
+    document.getElementById('ds-tpl-import-file')?.addEventListener('change', handleDsTemplateImportFile);
+    document.getElementById('ds-tpl-search-btn')?.addEventListener('click', () => {
+        dsTemplateFilter.keyword = (document.getElementById('ds-tpl-keyword')?.value || '').trim();
+        dsTemplateFilter.ttype = document.getElementById('ds-tpl-type')?.value || '';
+        dsTemplateFilter.is_active = document.getElementById('ds-tpl-status')?.value || '';
+        loadDsTemplates();
+    });
+    document.getElementById('ds-tpl-reset-btn')?.addEventListener('click', () => {
+        if (document.getElementById('ds-tpl-keyword')) document.getElementById('ds-tpl-keyword').value = '';
+        if (document.getElementById('ds-tpl-type')) document.getElementById('ds-tpl-type').value = '';
+        if (document.getElementById('ds-tpl-status')) document.getElementById('ds-tpl-status').value = '';
+        dsTemplateFilter = { keyword: '', ttype: '', is_active: '' };
+        loadDsTemplates();
+    });
+    document.getElementById('ds-cal-create-btn')?.addEventListener('click', () => openDsScheduleModal());
+    document.getElementById('ds-tpl-create-btn')?.addEventListener('click', () => openDsTemplateModal());
+    document.getElementById('ds-cal-batch-btn')?.addEventListener('click', openDsBatchModal);
+    document.getElementById('ds-sched-submit-btn')?.addEventListener('click', submitDsSchedule);
+    document.getElementById('ds-sched-check-btn')?.addEventListener('click', dsCheckConflict);
+    document.getElementById('ds-batch-submit-btn')?.addEventListener('click', submitDsBatchGenerate);
+    document.getElementById('ds-cancel-submit-btn')?.addEventListener('click', dsCancelScheduleSubmit);
+    document.getElementById('ds-copy-submit-btn')?.addEventListener('click', dsCopyScheduleSubmit);
+    document.getElementById('ds-cal-refresh-btn')?.addEventListener('click', () => {
+        dsScheduleFilter.keyword = (document.getElementById('ds-sched-f-keyword')?.value || '').trim();
+        dsScheduleFilter.status = document.getElementById('ds-sched-f-status')?.value || '';
+        dsScheduleFilter.venue_id = document.getElementById('ds-cal-venue')?.value || '';
+        dsScheduleFilter.from_date = document.getElementById('ds-cal-start')?.value || '';
+        dsScheduleFilter.to_date = document.getElementById('ds-cal-end')?.value || '';
+        loadDsSchedules();
+    });
+    document.getElementById('ds-cal-prev')?.addEventListener('click', dsPrevMonth);
+    document.getElementById('ds-cal-next')?.addEventListener('click', dsNextMonth);
+    document.getElementById('ds-cal-today')?.addEventListener('click', dsGoToday);
+    document.getElementById('ds-audit-recover-btn')?.addEventListener('click', dsTriggerRecover);
+    document.getElementById('ds-audit-refresh-btn')?.addEventListener('click', () => {
+        dsAuditFilter.resource_type = '';
+        dsAuditFilter.action = document.getElementById('ds-audit-action')?.value || '';
+        dsAuditFilter.operator = '';
+        dsAuditFilter.from_date = '';
+        dsAuditFilter.to_date = '';
+        loadDsAudit();
     });
 
     (async function init() {

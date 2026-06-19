@@ -523,3 +523,309 @@ class DrillRecoverResponse(BaseModel):
     previous_status: str = ""
     current_status: str = ""
     message: str = ""
+
+
+class ScheduleTemplateBase(BaseModel):
+    name: str
+    template_type: str = "venue"
+    description: str = ""
+    version: str = "1.0"
+    is_active: bool = True
+    config_json: Dict = {}
+
+
+class ScheduleTemplateCreate(ScheduleTemplateBase):
+    pass
+
+
+class ScheduleTemplateUpdate(BaseModel):
+    name: Optional[str] = None
+    template_type: Optional[str] = None
+    description: Optional[str] = None
+    version: Optional[str] = None
+    is_active: Optional[bool] = None
+    config_json: Optional[Dict] = None
+    change_note: str = ""
+
+
+class ScheduleTemplateResponse(BaseModel):
+    id: int
+    name: str
+    template_type: str
+    description: str
+    version: str
+    is_active: bool
+    config_json: Dict = {}
+    created_by: int
+    created_by_name: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ScheduleTemplateVersionResponse(BaseModel):
+    id: int
+    template_id: int
+    version: str
+    snapshot_json: Dict = {}
+    change_note: str = ""
+    created_by: int
+    created_by_name: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ScheduleTemplateImportValidateResult(BaseModel):
+    valid: bool
+    errors: List[str] = []
+    blocking_errors: List[str] = []
+    warnings: List[str] = []
+
+
+class ScheduleTemplateImportResult(BaseModel):
+    success: bool
+    template_id: Optional[int] = None
+    errors: List[str] = []
+    blocking_errors: List[str] = []
+    warnings: List[str] = []
+
+
+class ScheduleCancelBody(BaseModel):
+    reason: str = ""
+
+
+class ScheduleCopyBody(BaseModel):
+    new_date: Optional[date] = None
+    new_start_time: Optional[str] = None
+    new_end_time: Optional[str] = None
+
+
+class ScheduleBatchGenerateBody(BaseModel):
+    start_date: date
+    end_date: date
+    venue_template_id: Optional[int] = None
+    venue_id: Optional[int] = None
+    daily_start_time: str = "09:00:00"
+    daily_end_time: str = "11:00:00"
+    base_title: str = "演练"
+    exclude_weekends: bool = True
+    group_template_id: Optional[int] = None
+    checklist_template_id: Optional[int] = None
+    cleanup_template_id: Optional[int] = None
+    drill_script_id: Optional[int] = None
+
+
+class DrillScheduleBase(BaseModel):
+    title: str
+    schedule_date: date
+    start_time: time
+    end_time: time
+    venue_id: int
+    venue_template_id: Optional[int] = None
+    group_template_id: Optional[int] = None
+    checklist_template_id: Optional[int] = None
+    cleanup_template_id: Optional[int] = None
+    drill_script_id: Optional[int] = None
+    notes: str = ""
+
+
+class DrillScheduleCreate(DrillScheduleBase):
+    auto_generate_members: bool = True
+
+
+class DrillScheduleUpdate(BaseModel):
+    title: Optional[str] = None
+    schedule_date: Optional[date] = None
+    start_time: Optional[time] = None
+    end_time: Optional[time] = None
+    venue_id: Optional[int] = None
+    venue_template_id: Optional[int] = None
+    group_template_id: Optional[int] = None
+    checklist_template_id: Optional[int] = None
+    cleanup_template_id: Optional[int] = None
+    drill_script_id: Optional[int] = None
+    notes: Optional[str] = None
+
+
+class DrillScheduleConflict(BaseModel):
+    type: str
+    schedule_no: str = ""
+    title: str = ""
+    venue_name: str = ""
+    schedule_date: str = ""
+    start_time: str = ""
+    end_time: str = ""
+    reason: str = ""
+
+
+class DrillScheduleResponse(BaseModel):
+    id: int
+    schedule_no: str
+    title: str
+    status: str
+    schedule_date: date
+    start_time: time
+    end_time: time
+    venue_id: int
+    venue_name: Optional[str] = None
+    venue_template_id: Optional[int] = None
+    venue_template_name: Optional[str] = None
+    group_template_id: Optional[int] = None
+    group_template_name: Optional[str] = None
+    checklist_template_id: Optional[int] = None
+    checklist_template_name: Optional[str] = None
+    cleanup_template_id: Optional[int] = None
+    cleanup_template_name: Optional[str] = None
+    template_snapshot: Dict = {}
+    batch_id: str = ""
+    drill_script_id: Optional[int] = None
+    drill_script_name: Optional[str] = None
+    conflict_details: List = []
+    notes: str = ""
+    created_by: int
+    created_by_name: Optional[str] = None
+    published_by: Optional[int] = None
+    published_by_name: Optional[str] = None
+    cancelled_by: Optional[int] = None
+    cancelled_by_name: Optional[str] = None
+    locked_by: Optional[int] = None
+    locked_by_name: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    published_at: Optional[datetime] = None
+    cancelled_at: Optional[datetime] = None
+    locked_at: Optional[datetime] = None
+    executed_at: Optional[datetime] = None
+    conflicts: List[DrillScheduleConflict] = []
+
+    class Config:
+        from_attributes = True
+
+
+class DrillScheduleListResponse(BaseModel):
+    items: List[DrillScheduleResponse]
+    total: int
+    page: int
+    page_size: int
+
+
+class ScheduleAuditLogResponse(BaseModel):
+    id: int
+    schedule_id: int
+    schedule_no: str = ""
+    user_id: int
+    user_name: Optional[str] = None
+    action: str
+    action_text: str = ""
+    old_value: Dict = {}
+    new_value: Dict = {}
+    change_note: str = ""
+    ip_address: str = ""
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ScheduleMemberResponse(BaseModel):
+    id: int
+    schedule_id: int
+    user_id: int
+    user_name: str = ""
+    full_name: str = ""
+    group_name: str = ""
+    role_in_schedule: str = ""
+    result_data: Dict = {}
+    download_summary: str = ""
+    joined_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ScheduleMemberPersonalView(BaseModel):
+    schedule_id: int
+    schedule_no: str
+    title: str
+    status: str
+    schedule_date: date
+    start_time: time
+    end_time: time
+    venue_name: str = ""
+    group_name: str = ""
+    role_in_schedule: str = ""
+    my_result: Dict = {}
+    my_download_summary: str = ""
+    checklist_items: List = []
+    execution_entries: List = []
+
+
+class ScheduleActionResponse(BaseModel):
+    success: bool
+    schedule_no: str
+    previous_status: str = ""
+    current_status: str = ""
+    message: str = ""
+    batch_id: str = ""
+
+
+class ScheduleCopyResult(BaseModel):
+    success: bool
+    original_schedule_no: str
+    new_schedule_no: str
+    new_schedule_id: Optional[int] = None
+    message: str = ""
+
+
+class ScheduleBatchGenerateResult(BaseModel):
+    success: bool
+    schedule_no: str
+    batch_id: str
+    message: str = ""
+
+
+class ScheduleCleanupResult(BaseModel):
+    success: bool
+    schedule_no: str
+    removed_samples: int = 0
+    removed_temp_files: int = 0
+    removed_placeholders: int = 0
+    message: str = ""
+
+
+class ScheduleRecoverResult(BaseModel):
+    schedule_no: str
+    recovered: bool
+    previous_status: str = ""
+    current_status: str = ""
+    message: str = ""
+
+
+class ScheduleCalendarItem(BaseModel):
+    id: int
+    schedule_no: str
+    title: str
+    status: str
+    schedule_date: date
+    start_time: time
+    end_time: time
+    venue_id: int
+    venue_name: str = ""
+    has_conflict: bool = False
+
+
+class ScheduleRecoverSummary(BaseModel):
+    recovered_count: int = 0
+    items: List[ScheduleRecoverResult] = []
+    message: str = ""
+
+
+class AuditLogListResponse(BaseModel):
+    items: List[ScheduleAuditLogResponse] = []
+    total: int = 0
+    page: int = 1
+    page_size: int = 100

@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Date, Time, Boolean, ForeignKey, Text
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Date, Time, Boolean, ForeignKey, Text, Float
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from datetime import datetime
 
@@ -306,6 +306,162 @@ class DrillArtifact(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     owner = relationship("User", foreign_keys=[user_id])
+
+
+class ScheduleTemplate(Base):
+    __tablename__ = "schedule_templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(200), nullable=False, unique=True, index=True)
+    template_type = Column(String(50), nullable=False, default="venue")
+    # venue: 场地模板, group: 成员分组, checklist: 浏览器检查清单, cleanup: 清理规则
+
+    description = Column(Text, default="")
+    version = Column(String(50), default="1.0")
+    is_active = Column(Boolean, default=True)
+
+    config_json = Column(Text, default="{}")
+    # venue: {"venue_ids":[], "time_slots":[{"start":"09:00","end":"12:00", "duration_min":180}]}
+    # group: {"groups":[{"name":"A组","members":[1,2,3]}, {"name":"B组","members":[4,5,6]}]}
+    # checklist: {"items":[{"name":"浏览器加载","required":true}, {"name":"登录功能","required":true}]}
+    # cleanup: {"cleanup_types":["samples","temp_files","placeholders"], "keep_days":7}
+
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    creator = relationship("User", foreign_keys=[created_by])
+
+
+class ScheduleTemplateVersion(Base):
+    __tablename__ = "schedule_template_versions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    template_id = Column(Integer, ForeignKey("schedule_templates.id"), nullable=False, index=True)
+    version = Column(String(50), nullable=False)
+    snapshot_json = Column(Text, default="{}")
+    change_note = Column(Text, default="")
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    template = relationship("ScheduleTemplate", foreign_keys=[template_id])
+    creator = relationship("User", foreign_keys=[created_by])
+
+
+class DrillSchedule(Base):
+    __tablename__ = "drill_schedules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    schedule_no = Column(String(100), unique=True, nullable=False, index=True)
+    title = Column(String(200), nullable=False)
+
+    status = Column(String(30), default="draft")
+    # draft: 草稿, published: 已发布, locked: 已锁定,
+    # cancelled: 已撤销, executing: 执行中, completed: 已完成
+
+    schedule_date = Column(Date, nullable=False)
+    start_time = Column(Time, nullable=False)
+    end_time = Column(Time, nullable=False)
+    venue_id = Column(Integer, ForeignKey("venues.id"), nullable=False)
+
+    venue_template_id = Column(Integer, ForeignKey("schedule_templates.id"), nullable=True)
+    group_template_id = Column(Integer, ForeignKey("schedule_templates.id"), nullable=True)
+    checklist_template_id = Column(Integer, ForeignKey("schedule_templates.id"), nullable=True)
+    cleanup_template_id = Column(Integer, ForeignKey("schedule_templates.id"), nullable=True)
+
+    template_snapshot = Column(Text, default="{}")
+
+    batch_id = Column(String(100), default="")
+    drill_script_id = Column(Integer, ForeignKey("drill_scripts.id"), nullable=True)
+
+    conflict_details = Column(Text, default="[]")
+    notes = Column(Text, default="")
+
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    published_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    cancelled_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    locked_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    published_at = Column(DateTime, nullable=True)
+    cancelled_at = Column(DateTime, nullable=True)
+    locked_at = Column(DateTime, nullable=True)
+    executed_at = Column(DateTime, nullable=True)
+
+    venue = relationship("Venue", foreign_keys=[venue_id])
+    venue_template = relationship("ScheduleTemplate", foreign_keys=[venue_template_id])
+    group_template = relationship("ScheduleTemplate", foreign_keys=[group_template_id])
+    checklist_template = relationship("ScheduleTemplate", foreign_keys=[checklist_template_id])
+    cleanup_template = relationship("ScheduleTemplate", foreign_keys=[cleanup_template_id])
+    creator = relationship("User", foreign_keys=[created_by])
+    publisher = relationship("User", foreign_keys=[published_by])
+    canceller = relationship("User", foreign_keys=[cancelled_by])
+    locker = relationship("User", foreign_keys=[locked_by])
+    drill_script = relationship("DrillScript", foreign_keys=[drill_script_id])
+
+
+class ScheduleAuditLog(Base):
+    __tablename__ = "schedule_audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    schedule_id = Column(Integer, ForeignKey("drill_schedules.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+
+    action = Column(String(50), nullable=False)
+    # create, update, publish, lock, unlock, cancel, execute, copy, generate_batch
+
+    old_value = Column(Text, default="{}")
+    new_value = Column(Text, default="{}")
+    change_note = Column(Text, default="")
+    ip_address = Column(String(50), default="")
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    schedule = relationship("DrillSchedule", foreign_keys=[schedule_id])
+    user = relationship("User", foreign_keys=[user_id])
+
+
+class ScheduleMember(Base):
+    __tablename__ = "schedule_members"
+
+    id = Column(Integer, primary_key=True, index=True)
+    schedule_id = Column(Integer, ForeignKey("drill_schedules.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+
+    group_name = Column(String(100), default="")
+    role_in_schedule = Column(String(50), default="participant")
+    # participant, observer, coordinator
+
+    result_data = Column(Text, default="{}")
+    download_summary = Column(Text, default="")
+
+    joined_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        {'sqlite_autoincrement': True},
+    )
+
+    schedule = relationship("DrillSchedule", foreign_keys=[schedule_id])
+    user = relationship("User", foreign_keys=[user_id])
+
+
+class SchedulePlaceholder(Base):
+    __tablename__ = "schedule_placeholders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    schedule_id = Column(Integer, ForeignKey("drill_schedules.id"), nullable=False, index=True)
+
+    placeholder_type = Column(String(50), nullable=False)
+    # booking_placeholder, waitlist_placeholder, temp_file, sample_data
+
+    reference_key = Column(String(200), default="")
+    data_json = Column(Text, default="{}")
+    file_path = Column(String(500), default="")
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    schedule = relationship("DrillSchedule", foreign_keys=[schedule_id])
 
 
 def get_db():

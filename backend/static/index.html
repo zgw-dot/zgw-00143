@@ -46,6 +46,7 @@
                 <button class="nav-tab active" data-tab="bookings">预约列表</button>
                 <button class="nav-tab" data-tab="waitlist">候补补位</button>
                 <button class="nav-tab" data-tab="new-booking">新建预约</button>
+                <button class="nav-tab" data-tab="drill-schedule">演练排期台</button>
                 <button class="nav-tab admin-only" data-tab="drill-center" style="display:none;">演练剧本中心</button>
                 <button class="nav-tab admin-only" data-tab="config" style="display:none;">配置管理</button>
             </nav>
@@ -231,6 +232,151 @@
                             <h2>⚡ 优先级规则</h2>
                             <div id="priority-list" class="config-list"></div>
                         </div>
+                    </div>
+                </section>
+
+                <section id="tab-drill-schedule" class="tab-content">
+                    <div class="drill-tabs">
+                        <button class="ds-subtab active" data-dsubtab="templates">📋 模板管理</button>
+                        <button class="ds-subtab" data-dsubtab="calendar">📅 排期日历</button>
+                        <button class="ds-subtab admin-only" data-dsubtab="audit" style="display:none;">📝 审计日志</button>
+                        <button class="ds-subtab" data-dsubtab="mine">👤 我的排期</button>
+                    </div>
+
+                    <div id="ds-subtab-templates" class="ds-subtab-content active">
+                        <div class="filter-bar">
+                            <div class="filter-item">
+                                <label>模板类型</label>
+                                <select id="ds-tpl-type">
+                                    <option value="">全部类型</option>
+                                    <option value="venue">🏢 场地模板</option>
+                                    <option value="group">👥 成员分组</option>
+                                    <option value="checklist">✅ 检查清单</option>
+                                    <option value="cleanup">🧹 清理规则</option>
+                                </select>
+                            </div>
+                            <div class="filter-item">
+                                <label>状态</label>
+                                <select id="ds-tpl-status">
+                                    <option value="">全部</option>
+                                    <option value="true">启用</option>
+                                    <option value="false">停用</option>
+                                </select>
+                            </div>
+                            <div class="filter-item">
+                                <label>关键词</label>
+                                <input type="text" id="ds-tpl-keyword" placeholder="搜索模板名称/描述...">
+                            </div>
+                            <div class="filter-item">
+                                <button id="ds-tpl-search-btn" class="btn btn-primary">搜索</button>
+                                <button id="ds-tpl-reset-btn" class="btn btn-outline">重置</button>
+                                <button id="ds-tpl-create-btn" class="btn btn-primary admin-only" style="display:none;">+ 新建模板</button>
+                                <button id="ds-tpl-import-btn" class="btn btn-secondary admin-only" style="display:none;">📥 导入</button>
+                                <input type="file" id="ds-tpl-import-file" accept=".json" style="display:none;">
+                            </div>
+                        </div>
+                        <div class="booking-list-header">
+                            <h2>模板列表</h2>
+                            <span id="ds-tpl-count" class="count-badge"></span>
+                        </div>
+                        <div class="booking-list" id="ds-template-list"></div>
+                    </div>
+
+                    <div id="ds-subtab-calendar" class="ds-subtab-content">
+                        <div class="filter-bar">
+                            <div class="filter-item">
+                                <label>起始日期</label>
+                                <input type="date" id="ds-cal-start">
+                            </div>
+                            <div class="filter-item">
+                                <label>结束日期</label>
+                                <input type="date" id="ds-cal-end">
+                            </div>
+                            <div class="filter-item">
+                                <label>场地</label>
+                                <select id="ds-cal-venue">
+                                    <option value="">全部场地</option>
+                                </select>
+                            </div>
+                            <div class="filter-item">
+                                <button id="ds-cal-refresh-btn" class="btn btn-primary">刷新</button>
+                                <button id="ds-cal-create-btn" class="btn btn-primary admin-only" style="display:none;">+ 新建排期</button>
+                                <button id="ds-cal-batch-btn" class="btn btn-success admin-only" style="display:none;">📆 批量生成</button>
+                            </div>
+                        </div>
+                        <div class="calendar-container">
+                            <div class="calendar-nav">
+                                <div>
+                                    <button id="ds-cal-prev" class="btn btn-outline">◀ 上月</button>
+                                    <button id="ds-cal-today" class="btn btn-outline">今天</button>
+                                    <button id="ds-cal-next" class="btn btn-outline">下月 ▶</button>
+                                </div>
+                                <h3 id="ds-cal-title" class="calendar-title" style="margin:0;">--</h3>
+                                <div></div>
+                            </div>
+                            <div id="ds-calendar"></div>
+                        </div>
+                        <div class="ds-schedule-table-wrap">
+                            <div class="booking-list-header">
+                                <h3>排期列表</h3>
+                                <span id="ds-sched-count" class="count-badge"></span>
+                            </div>
+                            <div class="booking-list" id="ds-schedule-list"></div>
+                        </div>
+                    </div>
+
+                    <div id="ds-subtab-mine" class="ds-subtab-content">
+                        <div class="filter-bar">
+                            <div class="filter-item">
+                                <label>状态</label>
+                                <select id="ds-mine-status">
+                                    <option value="">全部状态</option>
+                                    <option value="draft">草稿</option>
+                                    <option value="published">已发布</option>
+                                    <option value="locked">已锁定</option>
+                                    <option value="executing">执行中</option>
+                                    <option value="completed">已完成</option>
+                                    <option value="cancelled">已撤销</option>
+                                </select>
+                            </div>
+                            <div class="filter-item">
+                                <button id="ds-mine-refresh-btn" class="btn btn-primary">刷新</button>
+                            </div>
+                        </div>
+                        <div class="booking-list-header">
+                            <h2>我的排期</h2>
+                            <span id="ds-mine-count" class="count-badge"></span>
+                        </div>
+                        <div class="booking-list" id="ds-mine-list"></div>
+                    </div>
+
+                    <div id="ds-subtab-audit" class="ds-subtab-content admin-only" style="display:none;">
+                        <div class="filter-bar">
+                            <div class="filter-item">
+                                <label>操作类型</label>
+                                <select id="ds-audit-action">
+                                    <option value="">全部操作</option>
+                                    <option value="create">创建排期</option>
+                                    <option value="update">修改排期</option>
+                                    <option value="publish">发布排期</option>
+                                    <option value="lock">锁定排期</option>
+                                    <option value="unlock">解锁排期</option>
+                                    <option value="cancel">撤销排期</option>
+                                    <option value="copy">复制排期</option>
+                                    <option value="generate_batch">生成批次</option>
+                                    <option value="cleanup">清理数据</option>
+                                </select>
+                            </div>
+                            <div class="filter-item">
+                                <button id="ds-audit-refresh-btn" class="btn btn-primary">刷新</button>
+                                <button id="ds-audit-recover-btn" class="btn btn-warning">🔧 重启恢复</button>
+                            </div>
+                        </div>
+                        <div class="booking-list-header">
+                            <h2>审计日志</h2>
+                            <span id="ds-audit-count" class="count-badge"></span>
+                        </div>
+                        <div class="booking-list" id="ds-audit-list"></div>
                     </div>
                 </section>
 
@@ -526,9 +672,247 @@
             </div>
         </div>
 
+        <div id="ds-template-modal" class="modal" style="display:none;">
+            <div class="modal-content large-modal">
+                <div class="modal-header">
+                    <h2 id="ds-tpl-modal-title">新建模板</h2>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <form id="ds-template-form">
+                        <input type="hidden" id="ds-tpl-id">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>模板名称 *</label>
+                                <input type="text" id="ds-tpl-name" placeholder="请输入模板名称" required>
+                            </div>
+                            <div class="form-group">
+                                <label>模板类型 *</label>
+                                <select id="ds-tpl-ttype" required>
+                                    <option value="venue">🏢 场地模板</option>
+                                    <option value="group">👥 成员分组</option>
+                                    <option value="checklist">✅ 浏览器检查清单</option>
+                                    <option value="cleanup">🧹 清理规则</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>版本</label>
+                                <input type="text" id="ds-tpl-version" value="1.0">
+                            </div>
+                            <div class="form-group">
+                                <label>状态</label>
+                                <select id="ds-tpl-active">
+                                    <option value="true">启用</option>
+                                    <option value="false">停用</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>描述</label>
+                            <textarea id="ds-tpl-desc" rows="2" placeholder="选填"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>配置 (JSON) *</label>
+                            <textarea id="ds-tpl-config" rows="8"
+                                      placeholder='场地模板: {"venue_ids":[1,2],"time_slots":[{"start":"09:00","end":"12:00"}]}&#10;成员分组: {"groups":[{"name":"A组","members":[2,3]}]}&#10;检查清单: {"items":[{"name":"登录","required":true}]}&#10;清理规则: {"cleanup_types":["samples","temp_files"]}'></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>变更说明（仅更新时生效）</label>
+                            <input type="text" id="ds-tpl-changenote" placeholder="选填，留空自动生成">
+                        </div>
+                        <div id="ds-tpl-warn" class="conflict-warning" style="display:none;"></div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline modal-close-btn">取消</button>
+                    <button id="ds-tpl-submit-btn" class="btn btn-primary">保存</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="ds-schedule-modal" class="modal" style="display:none;">
+            <div class="modal-content large-modal">
+                <div class="modal-header">
+                    <h2 id="ds-sched-modal-title">新建排期</h2>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <form id="ds-schedule-form">
+                        <input type="hidden" id="ds-sched-id">
+                        <div class="form-group">
+                            <label>排期标题 *</label>
+                            <input type="text" id="ds-sched-title" placeholder="请输入排期标题" required>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>排期日期 *</label>
+                                <input type="date" id="ds-sched-date" required>
+                            </div>
+                            <div class="form-group">
+                                <label>场地 *</label>
+                                <select id="ds-sched-venue" required></select>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>开始时间 *</label>
+                                <input type="time" id="ds-sched-start" value="09:00" required>
+                            </div>
+                            <div class="form-group">
+                                <label>结束时间 *</label>
+                                <input type="time" id="ds-sched-end" value="12:00" required>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>场地模板</label>
+                                <select id="ds-sched-venue-tpl"><option value="">未使用</option></select>
+                            </div>
+                            <div class="form-group">
+                                <label>成员分组模板</label>
+                                <select id="ds-sched-group-tpl"><option value="">未使用</option></select>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>检查清单模板</label>
+                                <select id="ds-sched-check-tpl"><option value="">未使用</option></select>
+                            </div>
+                            <div class="form-group">
+                                <label>清理规则模板</label>
+                                <select id="ds-sched-clean-tpl"><option value="">未使用</option></select>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>关联演练剧本</label>
+                            <select id="ds-sched-script"><option value="">未关联</option></select>
+                        </div>
+                        <div class="form-group">
+                            <label>备注</label>
+                            <textarea id="ds-sched-notes" rows="2" placeholder="选填"></textarea>
+                        </div>
+                        <div id="ds-sched-warn" class="conflict-warning" style="display:none;"></div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button id="ds-sched-check-btn" class="btn btn-outline">检测冲突</button>
+                    <button class="btn btn-outline modal-close-btn">取消</button>
+                    <button id="ds-sched-submit-btn" class="btn btn-primary">保存</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="ds-schedule-detail-modal" class="modal" style="display:none;">
+            <div class="modal-content large-modal">
+                <div class="modal-header">
+                    <h2 id="ds-detail-modal-title">排期详情</h2>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body" id="ds-detail-body"></div>
+                <div class="modal-footer" id="ds-detail-footer"></div>
+            </div>
+        </div>
+
+        <div id="ds-template-detail-modal" class="modal" style="display:none;">
+            <div class="modal-content large-modal">
+                <div class="modal-header">
+                    <h2 id="ds-tpldetail-title">模板详情</h2>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body" id="ds-tpldetail-body"></div>
+                <div class="modal-footer" id="ds-tpldetail-footer"></div>
+            </div>
+        </div>
+
+        <div id="ds-batch-modal" class="modal" style="display:none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>按模板批量生成排期</h2>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>起始日期 *</label>
+                            <input type="date" id="ds-batch-start" required>
+                        </div>
+                        <div class="form-group">
+                            <label>结束日期 *</label>
+                            <input type="date" id="ds-batch-end" required>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>场地模板 *</label>
+                        <select id="ds-batch-venue-tpl" required></select>
+                    </div>
+                    <div class="form-group">
+                        <label>标题前缀</label>
+                        <input type="text" id="ds-batch-prefix" value="日常演练">
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>成员分组模板</label>
+                            <select id="ds-batch-group-tpl"><option value="">未使用</option></select>
+                        </div>
+                        <div class="form-group">
+                            <label>关联剧本</label>
+                            <select id="ds-batch-script"><option value="">未关联</option></select>
+                        </div>
+                    </div>
+                    <div id="ds-batch-warn" class="conflict-warning" style="display:none;"></div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline modal-close-btn">取消</button>
+                    <button id="ds-batch-submit-btn" class="btn btn-primary">生成</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="ds-cancel-modal" class="modal" style="display:none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>撤销排期</h2>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p id="ds-cancel-hint" class="cancel-hint"></p>
+                    <div class="form-group">
+                        <label>撤销原因</label>
+                        <textarea id="ds-cancel-reason" rows="3" placeholder="选填"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline modal-close-btn">取消</button>
+                    <button id="ds-cancel-submit-btn" class="btn btn-danger">确认撤销</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="ds-copy-modal" class="modal" style="display:none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>复制排期</h2>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p id="ds-copy-hint" class="cancel-hint"></p>
+                    <div class="form-group">
+                        <label>新排期日期（留空则复制原日期）</label>
+                        <input type="date" id="ds-copy-date">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline modal-close-btn">取消</button>
+                    <button id="ds-copy-submit-btn" class="btn btn-primary">确认复制</button>
+                </div>
+            </div>
+        </div>
+
         <div id="toast" class="toast" style="display:none;"></div>
     </div>
 
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=20250702"></script>
 </body>
 </html>
