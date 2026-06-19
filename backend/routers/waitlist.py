@@ -42,6 +42,7 @@ def waitlist_to_response(db: Session, entry: WaitlistEntry) -> WaitlistResponse:
         status=entry.status,
         queue_position=entry.queue_position,
         blocked_by_type=entry.blocked_by_type or "",
+        blocked_by_details=entry.blocked_by_details or "",
         filled_booking_id=entry.filled_booking_id,
         filled_at=entry.filled_at,
         filled_method=entry.filled_method,

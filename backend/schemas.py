@@ -273,6 +273,7 @@ class WaitlistResponse(WaitlistBase):
     status: str
     queue_position: int
     blocked_by_type: str = ""
+    blocked_by_details: str = ""
     filled_booking_id: Optional[int] = None
     filled_at: Optional[datetime] = None
     filled_method: Optional[str] = None

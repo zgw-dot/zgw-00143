@@ -179,5 +179,34 @@ adm_can_see_any = r.status_code == 200
 passed += case('S14: 管理员看任意候补=200', adm_can_see_any, f'{r.status_code}')
 
 print()
-print(f'==== 前端相关回归总结: {passed}/{total} 通过 ====')
-sys.exit(0 if passed == total else 1)
+print(f'==== 前端相关回归总结（API级）: {passed}/{total} 通过 ====')
+
+# ========== 浏览器级回归测试（可选） ==========
+import os
+_browser_enabled = os.environ.get('RUN_BROWSER_TESTS') == '1' or '--browser' in sys.argv
+_browser_passed = True
+if _browser_enabled:
+    print()
+    print('=' * 60)
+    print('  启动浏览器级候补回归测试')
+    print('=' * 60)
+    try:
+        from test_browser_waitlist import main as browser_waitlist_main
+        _browser_exit_code = browser_waitlist_main()
+        _browser_passed = _browser_exit_code == 0
+    except ImportError as e:
+        print(f'[WARN] 无法运行浏览器测试: {e}')
+        print('       请确保已安装 playwright: pip install playwright')
+        print('       并安装浏览器: python -m playwright install chromium')
+    except Exception as e:
+        print(f'[WARN] 浏览器测试运行出错: {e}')
+        _browser_passed = False
+else:
+    print()
+    print('提示: 设置环境变量 RUN_BROWSER_TESTS=1 或加 --browser 参数')
+    print('      可运行浏览器级候补回归测试（DOM断言 + 下载验证）')
+    print('      命令: python test_frontend_regression.py --browser')
+
+api_pass = passed == total
+all_pass = api_pass and (not _browser_enabled or _browser_passed)
+sys.exit(0 if all_pass else 1)

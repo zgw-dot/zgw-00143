@@ -336,7 +336,7 @@ function renderWaitlist(data) {
     }
 
     listEl.innerHTML = data.items.map(w => {
-        const queueBadge = w.status === 'waiting' && w.queue_position
+        const queueBadge = w.status === 'waiting' && w.queue_position > 0
             ? `<span class="queue-badge">#${w.queue_position}</span>` : '';
         const floatBadge = (w.float_before_minutes || w.float_after_minutes)
             ? `<span class="status-badge wl-status-float">±${w.float_before_minutes}/${w.float_after_minutes}分钟</span>` : '';
@@ -559,10 +559,11 @@ async function submitWaitlistCreate() {
         await apiRequest('/waitlist', {
             method: 'POST',
             body: JSON.stringify({
+                title: production,
                 production,
                 venue_id: parseInt(venue_id),
-                target_start_time: new Date(start).toISOString(),
-                target_end_time: new Date(end).toISOString(),
+                target_start_time: start + ':00',
+                target_end_time: end + ':00',
                 float_before_minutes: before,
                 float_after_minutes: after,
                 priority,
@@ -575,8 +576,13 @@ async function submitWaitlistCreate() {
     } catch (e) {
         const warnEl = document.getElementById('wl-create-warn');
         let msg = '操作失败';
-        if (typeof e.detail === 'string') msg = e.detail;
-        else if (e.detail && e.detail.message) msg = e.detail.message;
+        if (typeof e.detail === 'string') {
+            msg = e.detail;
+        } else if (Array.isArray(e.detail)) {
+            msg = e.detail.map(d => d.msg || d.message || JSON.stringify(d)).join('; ');
+        } else if (e.detail && e.detail.message) {
+            msg = e.detail.message;
+        }
         warnEl.innerHTML = `<h3>⚠️ ${escapeHtml(msg)}</h3><div style="font-size:12px;color:#666;">请调整时段或联系管理员</div>`;
         warnEl.style.display = 'block';
     }
