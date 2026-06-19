@@ -1,0 +1,18 @@
+======== 候补补位快速回归测试 ========
+[PASS] T1: 创建预约1成功
+[PASS] T1b: 管理员确认预约1
+[PASS] T2: 09-12预约被冲突拦截
+[PASS] T2b: 登记候补成功
+[PASS] T2c: 候补状态=waiting 队列=1 被挡类型=booking
+[PASS] T3: 重复候补被拦截
+[PASS] T4: 创建封场窗口
+[PASS] T4b: 被封场挡的候补登记
+[PASS] T4c: 被挡类型=closed_window
+[PASS] T5: 用户2偷看用户1候补详情被403
+[PASS] T5b: 用户2自己列表过滤
+[PASS] T6: 手动补位被冲突拦截
+[PASS] T6b: 普通成员不能手动补位
+[FAIL] T7-创建预约18-22 -- 409 {"detail":{"message":"预约存在冲突","conflicts":[{"booking_id":94,"title":"剧目A晚上","production":"剧目A","start_time":"2026-07-27T19:00:00","end_time":"2026-07-27T21:00:00","user_name":"用户u1_140127","venue_name
+退出: 预约3创建失败
+
+---STDERR---

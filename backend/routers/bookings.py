@@ -11,6 +11,7 @@ from schemas import (
     RescheduleRecordResponse, ConflictInfo, BookingListResponse
 )
 from conflict_detector import validate_new_booking, find_conflicting_bookings, find_conflicts_to_info, find_closed_windows, closed_windows_to_info
+from waitlist_service import try_auto_fill_on_slot_release
 
 router = APIRouter()
 
@@ -325,16 +326,38 @@ def update_booking_status(
         booking.approver_id = current_user.id
         booking.approved_at = datetime.utcnow()
 
+    auto_fill_results = []
+
     if new_status == "cancelled":
         if status_update.rejection_reason:
             booking.rejection_reason = status_update.rejection_reason
+        vacated_start = booking.start_time
+        vacated_end = booking.end_time
+        vacated_venue_id = booking.venue_id
 
     booking.status = new_status
     booking.version += 1
+    db.flush()
+
+    if new_status == "cancelled" and vacated_start and vacated_end and vacated_venue_id:
+        auto_fill_results = try_auto_fill_on_slot_release(
+            db,
+            vacated_venue_id,
+            vacated_start,
+            vacated_end,
+            trigger_reason="booking_cancelled",
+            operator_id=current_user.id
+        )
+
     db.commit()
     db.refresh(booking)
 
-    return booking_to_response(db, booking)
+    response = booking_to_response(db, booking)
+    if auto_fill_results:
+        response_dict = response.model_dump()
+        response_dict["auto_fill_results"] = [r.model_dump() for r in auto_fill_results]
+        return response_dict
+    return response
 
 
 @router.post("/{booking_id}/reschedule", response_model=BookingResponse)
@@ -400,6 +423,8 @@ def reschedule_booking(
 
     original_start = booking.start_time
     original_end = booking.end_time
+    original_venue_id = booking.venue_id
+
     booking.start_time = reschedule.new_start_time
     booking.end_time = reschedule.new_end_time
     booking.status = "rescheduling"
@@ -408,10 +433,26 @@ def reschedule_booking(
     booking.approved_at = None
     booking.version += 1
 
+    db.flush()
+
+    auto_fill_results = try_auto_fill_on_slot_release(
+        db,
+        original_venue_id,
+        original_start,
+        original_end,
+        trigger_reason="booking_rescheduled",
+        operator_id=current_user.id
+    )
+
     db.commit()
     db.refresh(booking)
 
-    return booking_to_response(db, booking)
+    response = booking_to_response(db, booking)
+    if auto_fill_results:
+        response_dict = response.model_dump()
+        response_dict["auto_fill_results"] = [r.model_dump() for r in auto_fill_results]
+        return response_dict
+    return response
 
 
 @router.get("/{booking_id}/reschedule-history", response_model=List[RescheduleRecordResponse])

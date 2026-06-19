@@ -237,3 +237,82 @@ class BookingListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class WaitlistBase(BaseModel):
+    venue_id: int
+    title: str
+    production: str
+    target_start_time: datetime
+    target_end_time: datetime
+    float_before_minutes: int = 0
+    float_after_minutes: int = 0
+    notes: str = ""
+    priority: int = 10
+
+
+class WaitlistCreate(WaitlistBase):
+    pass
+
+
+class WaitlistCancel(BaseModel):
+    cancel_reason: str = ""
+
+
+class WaitlistFillRequest(BaseModel):
+    method: str = "manual"
+    notes: str = ""
+    use_target_time: bool = True
+
+
+class WaitlistResponse(WaitlistBase):
+    id: int
+    user_id: int
+    user_name: Optional[str] = None
+    venue_name: Optional[str] = None
+    status: str
+    queue_position: int
+    blocked_by_type: str = ""
+    filled_booking_id: Optional[int] = None
+    filled_at: Optional[datetime] = None
+    filled_method: Optional[str] = None
+    cancelled_by: Optional[int] = None
+    cancelled_by_name: Optional[str] = None
+    cancelled_at: Optional[datetime] = None
+    cancel_reason: str = ""
+    expires_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class WaitlistLogResponse(BaseModel):
+    id: int
+    waitlist_entry_id: int
+    operator_id: Optional[int] = None
+    operator_name: Optional[str] = None
+    action: str
+    trigger_reason: str = ""
+    result_booking_id: Optional[int] = None
+    notes: str = ""
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class WaitlistListResponse(BaseModel):
+    items: List[WaitlistResponse]
+    total: int
+    page: int
+    page_size: int
+
+
+class WaitlistFillResult(BaseModel):
+    success: bool
+    waitlist_id: int
+    booking_id: Optional[int] = None
+    status: str
+    message: str = ""

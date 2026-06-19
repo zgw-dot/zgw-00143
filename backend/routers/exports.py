@@ -6,8 +6,8 @@ from datetime import datetime
 import io
 import csv
 
-from database import get_db, Booking, RescheduleRecord, ClosedWindow
-from auth import get_current_user
+from database import get_db, Booking, RescheduleRecord, ClosedWindow, WaitlistEntry, WaitlistLog
+from auth import get_current_user, get_current_admin
 from conflict_detector import find_closed_windows
 
 router = APIRouter()
@@ -128,6 +128,159 @@ def export_bookings_csv(
     content_bom = "\ufeff" + content
 
     filename = f"bookings_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+
+    return StreamingResponse(
+        iter([content_bom]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+@router.get("/waitlist.csv")
+def export_waitlist_csv(
+    production: Optional[str] = None,
+    venue_id: Optional[int] = None,
+    status: Optional[str] = None,
+    user_id: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_admin)
+):
+    query = db.query(WaitlistEntry)
+
+    if production:
+        query = query.filter(WaitlistEntry.production.like(f"%{production}%"))
+    if venue_id:
+        query = query.filter(WaitlistEntry.venue_id == venue_id)
+    if status:
+        status_list = [s.strip() for s in status.split(",") if s.strip()]
+        if status_list:
+            query = query.filter(WaitlistEntry.status.in_(status_list))
+    if user_id:
+        query = query.filter(WaitlistEntry.user_id == user_id)
+    if start_date:
+        query = query.filter(WaitlistEntry.target_start_time >= datetime.fromisoformat(start_date))
+    if end_date:
+        query = query.filter(WaitlistEntry.target_start_time <= datetime.fromisoformat(end_date))
+
+    entries = query.order_by(
+        WaitlistEntry.status.asc(),
+        WaitlistEntry.venue_id.asc(),
+        WaitlistEntry.target_start_time.asc(),
+        WaitlistEntry.queue_position.asc(),
+        WaitlistEntry.created_at.desc()
+    ).all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    writer.writerow([
+        "候补ID", "标题", "剧目", "场地", "申请人", "优先级",
+        "目标开始时间", "目标结束时间",
+        "前浮动(分钟)", "后浮动(分钟)",
+        "状态", "排队序号", "被挡住类型",
+        "补位方式", "补位时间", "对应预约ID",
+        "取消人", "取消时间", "取消原因",
+        "过期时间", "备注", "创建时间", "更新时间",
+        "日志序号", "操作类型", "触发原因",
+        "操作人", "对应预约ID", "日志备注", "日志时间"
+    ])
+
+    status_map = {
+        "waiting": "排队中",
+        "filled": "已补位",
+        "cancelled": "已取消",
+        "expired": "已过期"
+    }
+    blocked_map = {
+        "booking": "预约冲突",
+        "closed_window": "封场挡住",
+        "both": "预约+封场",
+        "": ""
+    }
+    fill_method_map = {
+        "auto": "自动补位",
+        "manual": "手动补位"
+    }
+    action_map = {
+        "create": "登记候补",
+        "fill": "补位成功",
+        "cancel": "取消候补",
+        "expire": "自动过期",
+        "auto_trigger": "自动触发"
+    }
+    trigger_map = {
+        "user_registered": "用户登记",
+        "booking_cancelled": "预约取消",
+        "booking_rescheduled": "预约改期",
+        "closed_window_revoked": "封场撤销",
+        "manual_fill": "管理员手动补位",
+        "manual_cancel": "手动取消",
+        "auto_expire": "自动过期"
+    }
+
+    for e in entries:
+        venue_name = e.venue.name if e.venue else ""
+        user_name = e.user.full_name if e.user else ""
+        canceller_name = e.canceller.full_name if e.canceller else ""
+        status_display = status_map.get(e.status, e.status)
+        blocked_display = blocked_map.get(e.blocked_by_type, e.blocked_by_type)
+        fill_method_display = fill_method_map.get(e.filled_method, e.filled_method or "")
+
+        base_row = [
+            e.id,
+            e.title,
+            e.production,
+            venue_name,
+            user_name,
+            e.priority,
+            e.target_start_time.strftime("%Y-%m-%d %H:%M:%S"),
+            e.target_end_time.strftime("%Y-%m-%d %H:%M:%S"),
+            e.float_before_minutes,
+            e.float_after_minutes,
+            status_display,
+            e.queue_position,
+            blocked_display,
+            fill_method_display,
+            e.filled_at.strftime("%Y-%m-%d %H:%M:%S") if e.filled_at else "",
+            e.filled_booking_id if e.filled_booking_id else "",
+            canceller_name,
+            e.cancelled_at.strftime("%Y-%m-%d %H:%M:%S") if e.cancelled_at else "",
+            e.cancel_reason or "",
+            e.expires_at.strftime("%Y-%m-%d %H:%M:%S") if e.expires_at else "",
+            e.notes or "",
+            e.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            e.updated_at.strftime("%Y-%m-%d %H:%M:%S")
+        ]
+
+        logs = db.query(WaitlistLog).filter(
+            WaitlistLog.waitlist_entry_id == e.id
+        ).order_by(WaitlistLog.created_at.asc()).all()
+
+        if not logs:
+            writer.writerow(base_row + ["", "", "", "", "", "", ""])
+        else:
+            for idx, log in enumerate(logs, 1):
+                operator_name = log.operator.full_name if log.operator else ""
+                action_display = action_map.get(log.action, log.action)
+                trigger_display = trigger_map.get(log.trigger_reason, log.trigger_reason or "")
+                log_row = [
+                    f"第{idx}条",
+                    action_display,
+                    trigger_display,
+                    operator_name,
+                    log.result_booking_id if log.result_booking_id else "",
+                    log.notes or "",
+                    log.created_at.strftime("%Y-%m-%d %H:%M:%S") if log.created_at else ""
+                ]
+                writer.writerow(base_row + log_row)
+
+    output.seek(0)
+    content = output.getvalue()
+    content_bom = "\ufeff" + content
+
+    filename = f"waitlist_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
 
     return StreamingResponse(
         iter([content_bom]),

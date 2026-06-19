@@ -12,6 +12,7 @@ from schemas import (
     ClosedWindowCreate, ClosedWindowResponse
 )
 from conflict_detector import has_overlapping_closed_window
+from waitlist_service import try_auto_fill_on_slot_release
 
 router = APIRouter()
 
@@ -264,9 +265,44 @@ def revoke_closed_window(
             detail="该封场窗口已被撤销"
         )
 
+    revoked_start = window.start_time
+    revoked_end = window.end_time
+    target_venue_id = window.venue_id
+
     window.is_revoked = True
     window.revoked_by = current_user.id
     window.revoked_at = datetime.utcnow()
+    db.flush()
+
+    auto_fill_results_all = []
+    if target_venue_id is None:
+        venues = db.query(Venue).filter(Venue.is_active == True).all()
+        for v in venues:
+            results = try_auto_fill_on_slot_release(
+                db,
+                v.id,
+                revoked_start,
+                revoked_end,
+                trigger_reason="closed_window_revoked",
+                operator_id=current_user.id
+            )
+            auto_fill_results_all.extend(results)
+    else:
+        auto_fill_results_all = try_auto_fill_on_slot_release(
+            db,
+            target_venue_id,
+            revoked_start,
+            revoked_end,
+            trigger_reason="closed_window_revoked",
+            operator_id=current_user.id
+        )
+
     db.commit()
     db.refresh(window)
-    return closed_window_to_response(db, window)
+
+    response = closed_window_to_response(db, window)
+    if auto_fill_results_all:
+        response_dict = response.model_dump()
+        response_dict["auto_fill_results"] = [r.model_dump() for r in auto_fill_results_all]
+        return response_dict
+    return response
