@@ -171,6 +171,20 @@
                         </div>
 
                         <div class="config-section">
+                            <h2>⏰ 临时封场窗口（小时级）</h2>
+                            <div class="add-form">
+                                <select id="new-window-venue">
+                                    <option value="">全部场地</option>
+                                </select>
+                                <input type="datetime-local" id="new-window-start" title="开始时间">
+                                <input type="datetime-local" id="new-window-end" title="结束时间">
+                                <input type="text" id="new-window-reason" placeholder="封场原因（如：设备检修、舞台联排）">
+                                <button id="add-closed-window-btn" class="btn btn-primary">添加</button>
+                            </div>
+                            <div id="closed-window-list" class="config-list"></div>
+                        </div>
+
+                        <div class="config-section">
                             <h2>⚡ 优先级规则</h2>
                             <div id="priority-list" class="config-list"></div>
                         </div>

@@ -59,6 +59,25 @@ class ClosedDate(Base):
     venue = relationship("Venue")
 
 
+class ClosedWindow(Base):
+    __tablename__ = "closed_windows"
+
+    id = Column(Integer, primary_key=True, index=True)
+    venue_id = Column(Integer, ForeignKey("venues.id"), nullable=True)  # null = all venues
+    start_time = Column(DateTime, nullable=False)
+    end_time = Column(DateTime, nullable=False)
+    reason = Column(String(255), default="")
+    is_revoked = Column(Boolean, default=False)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    revoked_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    revoked_at = Column(DateTime, nullable=True)
+
+    venue = relationship("Venue")
+    creator = relationship("User", foreign_keys=[created_by])
+    revoker = relationship("User", foreign_keys=[revoked_by])
+
+
 class PriorityRule(Base):
     __tablename__ = "priority_rules"
 

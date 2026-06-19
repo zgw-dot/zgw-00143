@@ -93,6 +93,41 @@ class ClosedDateResponse(ClosedDateBase):
         from_attributes = True
 
 
+class ClosedWindowBase(BaseModel):
+    venue_id: Optional[int] = None
+    start_time: datetime
+    end_time: datetime
+    reason: str = ""
+
+
+class ClosedWindowCreate(ClosedWindowBase):
+    apply_all_venues: bool = False
+
+
+class ClosedWindowResponse(ClosedWindowBase):
+    id: int
+    is_revoked: bool = False
+    created_by: int
+    created_by_name: Optional[str] = None
+    created_at: datetime
+    revoked_by: Optional[int] = None
+    revoked_by_name: Optional[str] = None
+    revoked_at: Optional[datetime] = None
+    venue: Optional[VenueResponse] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ClosedWindowInfo(BaseModel):
+    id: int
+    venue_id: Optional[int] = None
+    venue_name: Optional[str] = None
+    start_time: datetime
+    end_time: datetime
+    reason: str = ""
+
+
 class PriorityRuleBase(BaseModel):
     name: str
     priority_level: int = 10
@@ -175,6 +210,7 @@ class BookingResponse(BookingBase):
     created_at: datetime
     updated_at: datetime
     conflicts: Optional[List[ConflictInfo]] = None
+    closed_windows: Optional[List[ClosedWindowInfo]] = None
 
     class Config:
         from_attributes = True

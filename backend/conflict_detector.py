@@ -2,8 +2,8 @@ from datetime import datetime, date, time, timedelta
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 
-from database import Booking, ClosedDate, Venue, OpenSlot
-from schemas import ConflictInfo
+from database import Booking, ClosedDate, Venue, OpenSlot, ClosedWindow
+from schemas import ConflictInfo, ClosedWindowInfo
 
 
 DAY_NAMES = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
@@ -93,6 +93,70 @@ def is_closed_date(
         current += timedelta(days=1)
 
     return closed_dates
+
+
+def find_closed_windows(
+    db: Session,
+    venue_id: int,
+    start_time: datetime,
+    end_time: datetime
+) -> List[ClosedWindow]:
+    query = db.query(ClosedWindow).filter(
+        ClosedWindow.is_revoked == False,
+        ClosedWindow.start_time < end_time,
+        ClosedWindow.end_time > start_time
+    )
+
+    all_windows = query.filter(ClosedWindow.venue_id.is_(None)).all()
+    venue_windows = query.filter(ClosedWindow.venue_id == venue_id).all()
+
+    all_matching = []
+    for w in all_windows + venue_windows:
+        if check_time_overlap(start_time, end_time, w.start_time, w.end_time):
+            all_matching.append(w)
+
+    return all_matching
+
+
+def closed_windows_to_info(db: Session, windows: List[ClosedWindow]) -> List[ClosedWindowInfo]:
+    result = []
+    for w in windows:
+        venue_name = w.venue.name if w.venue else "全部场地"
+        result.append(ClosedWindowInfo(
+            id=w.id,
+            venue_id=w.venue_id,
+            venue_name=venue_name,
+            start_time=w.start_time,
+            end_time=w.end_time,
+            reason=w.reason or ""
+        ))
+    return result
+
+
+def has_overlapping_closed_window(
+    db: Session,
+    venue_id: Optional[int],
+    start_time: datetime,
+    end_time: datetime,
+    exclude_window_id: Optional[int] = None
+) -> bool:
+    query = db.query(ClosedWindow).filter(
+        ClosedWindow.is_revoked == False,
+        ClosedWindow.start_time < end_time,
+        ClosedWindow.end_time > start_time
+    )
+
+    if venue_id is None:
+        query = query.filter(ClosedWindow.venue_id.is_(None))
+    else:
+        query = query.filter(
+            (ClosedWindow.venue_id == venue_id) | (ClosedWindow.venue_id.is_(None))
+        )
+
+    if exclude_window_id:
+        query = query.filter(ClosedWindow.id != exclude_window_id)
+
+    return query.first() is not None
 
 
 def check_open_slots(
@@ -187,6 +251,7 @@ def validate_new_booking(
         "valid": True,
         "conflicts": [],
         "closed_dates": [],
+        "closed_windows": [],
         "open_slot_violations": []
     }
 
@@ -208,5 +273,10 @@ def validate_new_booking(
     if closed:
         result["valid"] = False
         result["closed_dates"] = [d.isoformat() for d in closed]
+
+    closed_windows = find_closed_windows(db, venue_id, start_time, end_time)
+    if closed_windows:
+        result["valid"] = False
+        result["closed_windows"] = [cw.model_dump(mode='json') for cw in closed_windows_to_info(db, closed_windows)]
 
     return result

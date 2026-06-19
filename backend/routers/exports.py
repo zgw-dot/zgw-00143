@@ -6,8 +6,9 @@ from datetime import datetime
 import io
 import csv
 
-from database import get_db, Booking, RescheduleRecord
+from database import get_db, Booking, RescheduleRecord, ClosedWindow
 from auth import get_current_user
+from conflict_detector import find_closed_windows
 
 router = APIRouter()
 
@@ -49,6 +50,7 @@ def export_bookings_csv(
         "预约ID", "标题", "剧目", "场地", "申请人", "状态",
         "开始时间", "结束时间", "优先级", "备注",
         "审批人", "审批时间", "创建时间", "更新时间",
+        "撞封场窗口", "封场时段", "封场原因",
         "改期序号", "原时段", "新时段", "改期原因", "改期操作人", "改期时间"
     ])
 
@@ -66,6 +68,14 @@ def export_bookings_csv(
         approver_name = b.approver.full_name if b.approver else ""
         status_display = status_map.get(b.status, b.status)
 
+        closed_windows = find_closed_windows(db, b.venue_id, b.start_time, b.end_time)
+        has_closed_window = "是" if closed_windows else "否"
+        closed_window_ranges = "; ".join([
+            f"{w.start_time.strftime('%Y-%m-%d %H:%M')}~{w.end_time.strftime('%Y-%m-%d %H:%M')}"
+            for w in closed_windows
+        ]) if closed_windows else ""
+        closed_window_reasons = "; ".join([w.reason or "封场" for w in closed_windows]) if closed_windows else ""
+
         base_row = [
             b.id,
             b.title,
@@ -80,7 +90,10 @@ def export_bookings_csv(
             approver_name,
             b.approved_at.strftime("%Y-%m-%d %H:%M:%S") if b.approved_at else "",
             b.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-            b.updated_at.strftime("%Y-%m-%d %H:%M:%S")
+            b.updated_at.strftime("%Y-%m-%d %H:%M:%S"),
+            has_closed_window,
+            closed_window_ranges,
+            closed_window_reasons
         ]
 
         reschedule_records = db.query(RescheduleRecord).filter(

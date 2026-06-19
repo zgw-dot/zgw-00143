@@ -170,12 +170,16 @@ function renderVenueOptions() {
     const filterSelect = document.getElementById('filter-venue');
     const bookingSelect = document.getElementById('booking-venue');
     const closedVenueSelect = document.getElementById('new-closed-venue');
+    const windowVenueSelect = document.getElementById('new-window-venue');
 
     const optionsHtml = venues.map(v => `<option value="${v.id}">${v.name}</option>`).join('');
 
     filterSelect.innerHTML = '<option value="">全部场地</option>' + optionsHtml;
     bookingSelect.innerHTML = '<option value="">请选择场地</option>' + optionsHtml;
     closedVenueSelect.innerHTML = '<option value="">全部场地</option>' + optionsHtml;
+    if (windowVenueSelect) {
+        windowVenueSelect.innerHTML = '<option value="">全部场地</option>' + optionsHtml;
+    }
 }
 
 async function loadBookings(page = 1) {
@@ -208,11 +212,17 @@ function renderBookings(data) {
         return;
     }
 
-    listEl.innerHTML = data.items.map(booking => `
+    listEl.innerHTML = data.items.map(booking => {
+        let closedWindowBadge = '';
+        if (booking.closed_windows && booking.closed_windows.length > 0) {
+            closedWindowBadge = '<span class="status-badge status-closed-window">🚫 撞封场</span>';
+        }
+        return `
         <div class="booking-card" onclick="showBookingDetail(${booking.id})">
             <div class="booking-card-header">
                 <span class="booking-card-title">${escapeHtml(booking.title)}</span>
                 <span class="status-badge ${getStatusClass(booking.status)}">${getStatusText(booking.status)}</span>
+                ${closedWindowBadge}
             </div>
             <div class="booking-card-meta">
                 <span>🎬 ${escapeHtml(booking.production)}</span>
@@ -232,7 +242,7 @@ function renderBookings(data) {
                 ${booking.status !== 'cancelled' ? `<button class="btn btn-danger" onclick="cancelBooking(${booking.id})">取消</button>` : ''}
             </div>
         </div>
-    `).join('');
+    `}).join('');
 }
 
 function renderPagination(data) {
@@ -277,6 +287,24 @@ async function showBookingDetail(id) {
                             <div class="conflict-item-meta">
                                 🎬 ${escapeHtml(c.production)} | 👤 ${escapeHtml(c.user_name)}<br>
                                 ⏰ ${formatDateTime(c.start_time)} ~ ${formatDateTime(c.end_time)}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        let closedWindowsHtml = '';
+        if (booking.closed_windows && booking.closed_windows.length > 0) {
+            closedWindowsHtml = `
+                <div class="detail-section">
+                    <h3>🚫 命中封场窗口</h3>
+                    ${booking.closed_windows.map(w => `
+                        <div class="conflict-item">
+                            <div class="conflict-item-title">${escapeHtml(w.venue_name || '全部场地')}</div>
+                            <div class="conflict-item-meta">
+                                ⏰ ${formatDateTime(w.start_time)} ~ ${formatDateTime(w.end_time)}<br>
+                                📝 原因: ${escapeHtml(w.reason || '封场')}
                             </div>
                         </div>
                     `).join('')}
@@ -370,6 +398,7 @@ async function showBookingDetail(id) {
             ` : ''}
 
             ${conflictsHtml}
+            ${closedWindowsHtml}
             ${historyHtml}
 
             <div class="detail-section">
@@ -587,6 +616,9 @@ function handleApiError(error) {
         if (error.detail.closed_dates && error.detail.closed_dates.length > 0) {
             message += '：包含封场日期';
         }
+        if (error.detail.closed_windows && error.detail.closed_windows.length > 0) {
+            message += '（撞上封场窗口）';
+        }
     }
     showToast(message, 'error');
 }
@@ -630,6 +662,18 @@ async function checkBookingConflicts() {
             if (result.closed_dates && result.closed_dates.length > 0) {
                 html += '<h4>包含以下封场日期：</h4>';
                 html += '<ul style="margin-left:20px;">' + result.closed_dates.map(d => `<li>${d}</li>`).join('') + '</ul>';
+            }
+            if (result.closed_windows && result.closed_windows.length > 0) {
+                html += '<h4>🚫 撞上以下封场窗口：</h4>';
+                html += result.closed_windows.map(w => `
+                    <div class="conflict-item">
+                        <div class="conflict-item-title">${escapeHtml(w.venue_name || '全部场地')}</div>
+                        <div class="conflict-item-meta">
+                            ⏰ ${formatDateTime(w.start_time)} ~ ${formatDateTime(w.end_time)}<br>
+                            📝 原因: ${escapeHtml(w.reason || '封场')}
+                        </div>
+                    </div>
+                `).join('');
             }
             detailsEl.innerHTML = html;
             warningEl.style.display = 'block';
@@ -731,7 +775,92 @@ function resetBookingForm() {
 
 async function loadConfig() {
     await loadClosedDates();
+    await loadClosedWindows();
     await loadPriorityRules();
+}
+
+async function loadClosedWindows() {
+    try {
+        const data = await apiRequest('/config/closed-windows');
+        renderClosedWindows(data);
+    } catch (e) {
+        console.error('加载封场窗口失败', e);
+    }
+}
+
+function renderClosedWindows(windows) {
+    const listEl = document.getElementById('closed-window-list');
+    if (!listEl) return;
+    if (windows.length === 0) {
+        listEl.innerHTML = '<div style="color:#999;font-size:13px;">暂无临时封场窗口</div>';
+        return;
+    }
+
+    listEl.innerHTML = windows.map(w => {
+        const venueText = w.venue ? w.venue.name : '全部场地';
+        const revokedClass = w.is_revoked ? 'config-item-revoked' : '';
+        const revokedBadge = w.is_revoked ? '<span class="status-badge status-cancelled">已撤销</span>' : '';
+        return `
+        <div class="config-item ${revokedClass}">
+            <div>
+                <div class="config-item-name">
+                    ${formatDateTime(w.start_time)} ~ ${formatDateTime(w.end_time)}
+                    ${revokedBadge}
+                </div>
+                <div class="config-item-desc">
+                    ${venueText} | ${escapeHtml(w.reason || '')}
+                    ${w.created_by_name ? ` | 创建人: ${escapeHtml(w.created_by_name)}` : ''}
+                    ${w.revoked_by_name ? ` | 撤销人: ${escapeHtml(w.revoked_by_name)}` : ''}
+                </div>
+            </div>
+            ${!w.is_revoked && currentUser.role === 'admin' ? `
+                <button class="btn btn-danger" style="padding:4px 10px;font-size:12px;" onclick="revokeClosedWindow(${w.id})">撤销</button>
+            ` : ''}
+        </div>
+    `}).join('');
+}
+
+async function addClosedWindow() {
+    const venueId = document.getElementById('new-window-venue').value;
+    const startTime = document.getElementById('new-window-start').value;
+    const endTime = document.getElementById('new-window-end').value;
+    const reason = document.getElementById('new-window-reason').value;
+
+    if (!startTime || !endTime) {
+        showToast('请选择开始和结束时间', 'warning');
+        return;
+    }
+
+    try {
+        await apiRequest('/config/closed-windows', {
+            method: 'POST',
+            body: JSON.stringify({
+                venue_id: venueId ? parseInt(venueId) : null,
+                start_time: new Date(startTime).toISOString(),
+                end_time: new Date(endTime).toISOString(),
+                reason: reason,
+                apply_all_venues: !venueId
+            })
+        });
+        showToast('添加成功');
+        document.getElementById('new-window-start').value = '';
+        document.getElementById('new-window-end').value = '';
+        document.getElementById('new-window-reason').value = '';
+        loadClosedWindows();
+    } catch (e) {
+        handleApiError(e);
+    }
+}
+
+async function revokeClosedWindow(id) {
+    if (!confirm('确定撤销此封场窗口吗？撤销后该时段可重新预约。')) return;
+    try {
+        await apiRequest(`/config/closed-windows/${id}`, { method: 'DELETE' });
+        showToast('已撤销');
+        loadClosedWindows();
+    } catch (e) {
+        handleApiError(e);
+    }
 }
 
 async function loadClosedDates() {
@@ -965,6 +1094,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('add-closed-date-btn').addEventListener('click', addClosedDate);
+    document.getElementById('add-closed-window-btn').addEventListener('click', addClosedWindow);
 
     document.getElementById('reschedule-submit-btn').addEventListener('click', submitReschedule);
 

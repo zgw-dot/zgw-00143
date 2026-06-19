@@ -3,14 +3,14 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timedelta
 
-from database import get_db, Booking, RescheduleRecord, User
+from database import get_db, Booking, RescheduleRecord, User, ClosedWindow
 from auth import get_current_user, get_current_admin
 from schemas import (
     BookingCreate, BookingUpdate, BookingResponse,
     BookingStatusUpdate, RescheduleRequest,
     RescheduleRecordResponse, ConflictInfo, BookingListResponse
 )
-from conflict_detector import validate_new_booking, find_conflicting_bookings, find_conflicts_to_info
+from conflict_detector import validate_new_booking, find_conflicting_bookings, find_conflicts_to_info, find_closed_windows, closed_windows_to_info
 
 router = APIRouter()
 
@@ -24,6 +24,11 @@ def raise_validation_error(validation: dict, message: str = "预约校验失败"
         detail["conflicts"] = [c.model_dump(mode='json') for c in validation["conflicts"]]
     if validation.get("closed_dates"):
         detail["closed_dates"] = validation["closed_dates"]
+    if validation.get("closed_windows"):
+        detail["closed_windows"] = validation["closed_windows"]
+        window_reasons = [f"{w['start_time']}~{w['end_time']}({w['reason'] or '封场'})" for w in validation["closed_windows"]]
+        if detail["message"] == message:
+            detail["message"] = f"撞上封场时段：{'；'.join(window_reasons)}"
     if validation.get("open_slot_violations"):
         detail["open_slot_violations"] = validation["open_slot_violations"]
         reasons = [v["reason"] for v in validation["open_slot_violations"]]
@@ -40,12 +45,18 @@ def booking_to_response(db: Session, booking: Booking, include_conflicts: bool =
     approver_name = booking.approver.full_name if booking.approver else None
 
     conflicts = None
-    if include_conflicts and booking.status in ["pending", "confirmed"]:
+    if include_conflicts and booking.status in ["pending", "confirmed", "rescheduling"]:
         conflict_bookings = find_conflicting_bookings(
             db, booking.venue_id, booking.start_time, booking.end_time,
             exclude_booking_id=booking.id
         )
         conflicts = find_conflicts_to_info(db, conflict_bookings)
+
+    closed_windows = None
+    if booking.status != "cancelled":
+        found_windows = find_closed_windows(db, booking.venue_id, booking.start_time, booking.end_time)
+        if found_windows:
+            closed_windows = closed_windows_to_info(db, found_windows)
 
     return BookingResponse(
         id=booking.id,
@@ -67,7 +78,8 @@ def booking_to_response(db: Session, booking: Booking, include_conflicts: bool =
         approved_at=booking.approved_at,
         created_at=booking.created_at,
         updated_at=booking.updated_at,
-        conflicts=conflicts
+        conflicts=conflicts,
+        closed_windows=closed_windows
     )
 
 
