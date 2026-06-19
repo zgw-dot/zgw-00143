@@ -44,6 +44,7 @@
 
             <nav class="app-nav">
                 <button class="nav-tab active" data-tab="bookings">预约列表</button>
+                <button class="nav-tab" data-tab="waitlist">候补补位</button>
                 <button class="nav-tab" data-tab="new-booking">新建预约</button>
                 <button class="nav-tab admin-only" data-tab="config" style="display:none;">配置管理</button>
             </nav>
@@ -88,6 +89,47 @@
                     </div>
 
                     <div class="pagination" id="pagination"></div>
+                </section>
+
+                <section id="tab-waitlist" class="tab-content">
+                    <div class="filter-bar">
+                        <div class="filter-item">
+                            <label>剧目</label>
+                            <input type="text" id="wl-filter-production" placeholder="搜索剧目...">
+                        </div>
+                        <div class="filter-item">
+                            <label>场地</label>
+                            <select id="wl-filter-venue">
+                                <option value="">全部场地</option>
+                            </select>
+                        </div>
+                        <div class="filter-item">
+                            <label>状态</label>
+                            <select id="wl-filter-status">
+                                <option value="">全部状态</option>
+                                <option value="waiting">排队中</option>
+                                <option value="filled">已补位</option>
+                                <option value="cancelled">已取消</option>
+                                <option value="expired">已过期</option>
+                            </select>
+                        </div>
+                        <div class="filter-item">
+                            <button id="wl-search-btn" class="btn btn-primary">搜索</button>
+                            <button id="wl-reset-btn" class="btn btn-outline">重置</button>
+                            <button id="wl-create-btn" class="btn btn-primary">+ 登记候补</button>
+                            <button id="wl-export-btn" class="btn btn-success admin-only" style="display:none;">导出CSV</button>
+                        </div>
+                    </div>
+
+                    <div class="booking-list-header">
+                        <h2>候补列表</h2>
+                        <span id="wl-count" class="count-badge"></span>
+                    </div>
+
+                    <div class="booking-list" id="waitlist-list">
+                    </div>
+
+                    <div class="pagination" id="wl-pagination"></div>
                 </section>
 
                 <section id="tab-new-booking" class="tab-content">
@@ -234,6 +276,73 @@
                 <div class="modal-footer">
                     <button class="btn btn-outline modal-close-btn">取消</button>
                     <button id="reschedule-submit-btn" class="btn btn-primary">提交改期</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="waitlist-detail-modal" class="modal" style="display:none;">
+            <div class="modal-content large-modal">
+                <div class="modal-header">
+                    <h2 id="wl-detail-title">候补详情</h2>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body" id="wl-detail-body"></div>
+                <div class="modal-footer" id="wl-detail-footer"></div>
+            </div>
+        </div>
+
+        <div id="waitlist-create-modal" class="modal" style="display:none;">
+            <div class="modal-content large-modal">
+                <div class="modal-header">
+                    <h2>登记候补</h2>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <form id="waitlist-create-form">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>剧目 *</label>
+                                <input type="text" id="wl-production" placeholder="请输入剧目名称" required>
+                            </div>
+                            <div class="form-group">
+                                <label>场地 *</label>
+                                <select id="wl-venue" required></select>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>目标开始时间 *</label>
+                                <input type="datetime-local" id="wl-start" required>
+                            </div>
+                            <div class="form-group">
+                                <label>目标结束时间 *</label>
+                                <input type="datetime-local" id="wl-end" required>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>前浮动（分钟）</label>
+                                <input type="number" id="wl-before" value="60" min="0">
+                            </div>
+                            <div class="form-group">
+                                <label>后浮动（分钟）</label>
+                                <input type="number" id="wl-after" value="60" min="0">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>优先级（越大越优先）</label>
+                            <input type="number" id="wl-priority" value="10" min="1" max="100">
+                        </div>
+                        <div class="form-group">
+                            <label>备注</label>
+                            <textarea id="wl-notes" rows="2" placeholder="选填"></textarea>
+                        </div>
+                        <div id="wl-create-warn" class="conflict-warning" style="display:none;"></div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline modal-close-btn">取消</button>
+                    <button id="wl-submit-btn" class="btn btn-primary">提交候补</button>
                 </div>
             </div>
         </div>

@@ -9,6 +9,9 @@ let filterParams = {
 };
 let venues = [];
 let currentBookingId = null;
+let currentWaitlistId = null;
+let wlPage = 1;
+let wlFilter = { production: '', venue_id: '', status: '' };
 
 function getToken() {
     return localStorage.getItem('token');
@@ -104,6 +107,29 @@ function getStatusClass(status) {
     return `status-${status}`;
 }
 
+function getWaitlistStatusText(status) {
+    const map = {
+        waiting: '排队中',
+        filled: '已补位',
+        cancelled: '已取消',
+        expired: '已过期'
+    };
+    return map[status] || status;
+}
+
+function getWaitlistStatusClass(status) {
+    return `wl-status-${status}`;
+}
+
+function getBlockedTypeText(t) {
+    const m = { booking: '被预约挡住', closed_window: '被封场挡住', both: '预约+封场' };
+    return m[t] || (t || '-');
+}
+
+function getFillMethodText(m) {
+    return m === 'auto' ? '自动补位' : (m === 'manual' ? '手动补位' : (m || '-'));
+}
+
 function showLoginPage() {
     document.getElementById('login-page').style.display = 'flex';
     document.getElementById('main-app').style.display = 'none';
@@ -121,6 +147,10 @@ function showMainApp() {
     if (currentUser.role === 'admin') {
         document.querySelectorAll('.admin-only').forEach(el => {
             el.style.display = 'block';
+        });
+    } else {
+        document.querySelectorAll('.admin-only').forEach(el => {
+            el.style.display = 'none';
         });
     }
 }
@@ -171,6 +201,8 @@ function renderVenueOptions() {
     const bookingSelect = document.getElementById('booking-venue');
     const closedVenueSelect = document.getElementById('new-closed-venue');
     const windowVenueSelect = document.getElementById('new-window-venue');
+    const wlFilterSelect = document.getElementById('wl-filter-venue');
+    const wlVenueSelect = document.getElementById('wl-venue');
 
     const optionsHtml = venues.map(v => `<option value="${v.id}">${v.name}</option>`).join('');
 
@@ -179,6 +211,12 @@ function renderVenueOptions() {
     closedVenueSelect.innerHTML = '<option value="">全部场地</option>' + optionsHtml;
     if (windowVenueSelect) {
         windowVenueSelect.innerHTML = '<option value="">全部场地</option>' + optionsHtml;
+    }
+    if (wlFilterSelect) {
+        wlFilterSelect.innerHTML = '<option value="">全部场地</option>' + optionsHtml;
+    }
+    if (wlVenueSelect) {
+        wlVenueSelect.innerHTML = '<option value="">请选择场地</option>' + optionsHtml;
     }
 }
 
@@ -267,6 +305,331 @@ function renderPagination(data) {
     html += `<button onclick="loadBookings(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''}>下一页</button>`;
 
     pagination.innerHTML = html;
+}
+
+async function loadWaitlist(page = 1) {
+    wlPage = page;
+    const params = new URLSearchParams();
+    params.append('page', page);
+    params.append('page_size', pageSize);
+    if (wlFilter.production) params.append('production', wlFilter.production);
+    if (wlFilter.venue_id) params.append('venue_id', wlFilter.venue_id);
+    if (wlFilter.status) params.append('status', wlFilter.status);
+
+    try {
+        const data = await apiRequest(`/waitlist?${params.toString()}`);
+        renderWaitlist(data);
+        renderWlPagination(data);
+    } catch (e) {
+        showToast('加载候补列表失败', 'error');
+    }
+}
+
+function renderWaitlist(data) {
+    const listEl = document.getElementById('waitlist-list');
+    const countEl = document.getElementById('wl-count');
+    countEl.textContent = `共 ${data.total} 条`;
+
+    if (data.items.length === 0) {
+        listEl.innerHTML = '<div style="text-align:center;padding:40px;color:#999;">暂无候补记录</div>';
+        return;
+    }
+
+    listEl.innerHTML = data.items.map(w => {
+        const queueBadge = w.status === 'waiting' && w.queue_position
+            ? `<span class="queue-badge">#${w.queue_position}</span>` : '';
+        const floatBadge = (w.float_before_minutes || w.float_after_minutes)
+            ? `<span class="status-badge wl-status-float">±${w.float_before_minutes}/${w.float_after_minutes}分钟</span>` : '';
+        const blockBadge = w.blocked_by_type
+            ? `<span class="status-badge wl-blocked">${getBlockedTypeText(w.blocked_by_type)}</span>` : '';
+
+        return `
+        <div class="booking-card" onclick="showWaitlistDetail(${w.id})">
+            <div class="booking-card-header">
+                <span class="booking-card-title">
+                    ${escapeHtml(w.production)} · ${escapeHtml(w.venue_name || '')}
+                    ${queueBadge}
+                </span>
+                <span>
+                    <span class="status-badge ${getWaitlistStatusClass(w.status)}">${getWaitlistStatusText(w.status)}</span>
+                    ${blockBadge}
+                    ${floatBadge}
+                </span>
+            </div>
+            <div class="booking-card-meta">
+                ${w.user_name ? `<span>👤 ${escapeHtml(w.user_name)}</span>` : ''}
+                <span>⏰ ${formatDateTime(w.target_start_time)} ~ ${formatDateTime(w.target_end_time)}</span>
+                <span>⭐ 优先级: ${w.priority}</span>
+                ${w.filled_at ? `<span>✅ ${getFillMethodText(w.filled_method)}: ${formatDateTime(w.filled_at)}</span>` : ''}
+                ${w.cancelled_at ? `<span>❌ 取消: ${formatDateTime(w.cancelled_at)}</span>` : ''}
+            </div>
+            ${w.notes ? `<div class="booking-card-meta"><span style="color:#999;">📝 ${escapeHtml(w.notes)}</span></div>` : ''}
+            <div class="booking-card-actions" onclick="event.stopPropagation()">
+                ${w.status === 'waiting' ? `
+                    ${currentUser.role === 'admin' ? `<button class="btn btn-success" onclick="manualFillWaitlist(${w.id})">手动补位</button>` : ''}
+                    <button class="btn btn-danger" onclick="cancelWaitlist(${w.id})">取消候补</button>
+                ` : ''}
+                ${w.filled_booking_id ? `<button class="btn btn-outline" onclick="showBookingDetail(${w.filled_booking_id})">查看补位预约</button>` : ''}
+            </div>
+        </div>
+    `}).join('');
+}
+
+function renderWlPagination(data) {
+    const pagination = document.getElementById('wl-pagination');
+    const totalPages = Math.ceil(data.total / pageSize);
+    if (totalPages <= 1) { pagination.innerHTML = ''; return; }
+
+    let html = `<button onclick="loadWaitlist(${wlPage - 1})" ${wlPage === 1 ? 'disabled' : ''}>上一页</button>`;
+    for (let i = 1; i <= totalPages; i++) {
+        if (i === 1 || i === totalPages || (i >= wlPage - 2 && i <= wlPage + 2)) {
+            html += `<button class="${i === wlPage ? 'active' : ''}" onclick="loadWaitlist(${i})">${i}</button>`;
+        } else if (i === wlPage - 3 || i === wlPage + 3) {
+            html += '<span>...</span>';
+        }
+    }
+    html += `<button onclick="loadWaitlist(${wlPage + 1})" ${wlPage === totalPages ? 'disabled' : ''}>下一页</button>`;
+    pagination.innerHTML = html;
+}
+
+async function showWaitlistDetail(id) {
+    try {
+        const wl = await apiRequest(`/waitlist/${id}`);
+        currentWaitlistId = id;
+        let logsHtml = '';
+        try {
+            const logs = await apiRequest(`/waitlist/${id}/logs`);
+            if (logs && logs.length > 0) {
+                logsHtml = `
+                <div class="detail-section">
+                    <h3>📜 操作日志 (${logs.length})</h3>
+                    <div style="font-size:13px;">
+                        ${logs.map(log => `
+                            <div class="conflict-item" style="margin-bottom:6px;background:#fafafa;">
+                                <div class="conflict-item-title" style="color:#333;">
+                                    [${formatDateTime(log.created_at)}] ${escapeHtml(log.action || '')}
+                                    ${log.trigger_reason ? `<span style="color:#888;font-size:12px;">触发: ${escapeHtml(log.trigger_reason)}</span>` : ''}
+                                </div>
+                                <div class="conflict-item-meta">
+                                    ${log.operator_name ? `操作人: ${escapeHtml(log.operator_name)}` : ''}
+                                    ${log.result_booking_id ? ` · 生成预约ID: ${log.result_booking_id}` : ''}
+                                    <br>
+                                    ${log.blocked_by_snapshot ? `原被挡: ${escapeHtml(log.blocked_by_snapshot)}<br>` : ''}
+                                    ${log.notes ? `说明: ${escapeHtml(log.notes)}` : ''}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>`;
+            }
+        } catch (e) { /* noop */ }
+
+        let blockHtml = '';
+        if (wl.blocked_by_type || wl.blocked_by_details) {
+            blockHtml = `
+            <div class="detail-section">
+                <h3>🚫 被挡详情</h3>
+                <div class="detail-row">
+                    <span class="detail-label">被挡类型</span>
+                    <span class="detail-value">${getBlockedTypeText(wl.blocked_by_type)}</span>
+                </div>
+                ${wl.blocked_by_details ? `
+                <div class="detail-row">
+                    <span class="detail-label">详细快照</span>
+                    <span class="detail-value" style="word-break:break-all;font-size:12px;color:#555;">
+                        <pre style="white-space:pre-wrap;background:#f7f7f7;padding:8px;border-radius:4px;">${escapeHtml(wl.blocked_by_details)}</pre>
+                    </span>
+                </div>` : ''}
+            </div>`;
+        }
+
+        let fillHtml = '';
+        if (wl.status === 'filled') {
+            fillHtml = `
+            <div class="detail-section">
+                <h3>✅ 补位结果</h3>
+                <div class="detail-row">
+                    <span class="detail-label">补位方式</span>
+                    <span class="detail-value">${getFillMethodText(wl.filled_method)}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">补位时间</span>
+                    <span class="detail-value">${formatDateTime(wl.filled_at)}</span>
+                </div>
+                ${wl.filled_booking_id ? `
+                <div class="detail-row">
+                    <span class="detail-label">关联预约</span>
+                    <span class="detail-value"><a style="color:#667eea;cursor:pointer;" onclick="showBookingDetail(${wl.filled_booking_id});closeModal('waitlist-detail-modal');">#${wl.filled_booking_id} 查看详情</a></span>
+                </div>` : ''}
+            </div>`;
+        }
+
+        let cancelHtml = '';
+        if (wl.status === 'cancelled') {
+            cancelHtml = `
+            <div class="detail-section">
+                <h3>❌ 取消信息</h3>
+                <div class="detail-row"><span class="detail-label">操作人</span><span class="detail-value">${escapeHtml(wl.cancelled_by_name || '-')}</span></div>
+                <div class="detail-row"><span class="detail-label">取消时间</span><span class="detail-value">${formatDateTime(wl.cancelled_at)}</span></div>
+                ${wl.cancel_reason ? `<div class="detail-row"><span class="detail-label">原因</span><span class="detail-value">${escapeHtml(wl.cancel_reason)}</span></div>` : ''}
+            </div>`;
+        }
+
+        document.getElementById('wl-detail-title').textContent = `${wl.production} · ${wl.venue_name || ''} 候补详情`;
+        document.getElementById('wl-detail-body').innerHTML = `
+            <div class="detail-section">
+                <h3>基本信息</h3>
+                <div class="detail-row">
+                    <span class="detail-label">状态</span>
+                    <span class="detail-value"><span class="status-badge ${getWaitlistStatusClass(wl.status)}">${getWaitlistStatusText(wl.status)}</span></span>
+                </div>
+                ${wl.queue_position ? `<div class="detail-row"><span class="detail-label">排队号</span><span class="detail-value">#${wl.queue_position}</span></div>` : ''}
+                <div class="detail-row"><span class="detail-label">剧目</span><span class="detail-value">${escapeHtml(wl.production)}</span></div>
+                <div class="detail-row"><span class="detail-label">场地</span><span class="detail-value">${escapeHtml(wl.venue_name || '')}</span></div>
+                ${wl.user_name ? `<div class="detail-row"><span class="detail-label">申请人</span><span class="detail-value">${escapeHtml(wl.user_name)}</span></div>` : ''}
+                <div class="detail-row"><span class="detail-label">目标时段</span><span class="detail-value">${formatDateTime(wl.target_start_time)} ~ ${formatDateTime(wl.target_end_time)}</span></div>
+                <div class="detail-row"><span class="detail-label">浮动范围</span><span class="detail-value">前 ${wl.float_before_minutes} 分钟 / 后 ${wl.float_after_minutes} 分钟</span></div>
+                <div class="detail-row"><span class="detail-label">优先级</span><span class="detail-value">${wl.priority}</span></div>
+                <div class="detail-row"><span class="detail-label">过期时间</span><span class="detail-value">${formatDateTime(wl.expires_at)}</span></div>
+                ${wl.notes ? `<div class="detail-row"><span class="detail-label">备注</span><span class="detail-value">${escapeHtml(wl.notes)}</span></div>` : ''}
+            </div>
+            ${blockHtml}
+            ${fillHtml}
+            ${cancelHtml}
+            ${logsHtml}
+            <div class="detail-section">
+                <h3>版本信息</h3>
+                <div class="detail-row"><span class="detail-label">创建时间</span><span class="detail-value">${formatDateTime(wl.created_at)}</span></div>
+                <div class="detail-row"><span class="detail-label">更新时间</span><span class="detail-value">${formatDateTime(wl.updated_at)}</span></div>
+            </div>
+        `;
+
+        let footer = '';
+        if (wl.status === 'waiting') {
+            if (currentUser.role === 'admin') {
+                footer += `<button class="btn btn-success" onclick="manualFillWaitlist(${wl.id});closeModal('waitlist-detail-modal');">手动补位</button>`;
+            }
+            footer += `<button class="btn btn-danger" onclick="cancelWaitlist(${wl.id});closeModal('waitlist-detail-modal');">取消候补</button>`;
+        }
+        if (wl.filled_booking_id) {
+            footer += `<button class="btn btn-outline" onclick="showBookingDetail(${wl.filled_booking_id});closeModal('waitlist-detail-modal');">查看补位预约</button>`;
+        }
+        footer += '<button class="btn btn-outline modal-close-btn">关闭</button>';
+        document.getElementById('wl-detail-footer').innerHTML = footer;
+        document.getElementById('waitlist-detail-modal').style.display = 'flex';
+    } catch (e) {
+        handleApiError(e);
+    }
+}
+
+function openWaitlistCreateModal() {
+    document.getElementById('wl-production').value = '';
+    const venSel = document.getElementById('wl-venue');
+    if (venSel) venSel.value = venues[0] ? venues[0].id : '';
+    document.getElementById('wl-start').value = '';
+    document.getElementById('wl-end').value = '';
+    document.getElementById('wl-before').value = '60';
+    document.getElementById('wl-after').value = '60';
+    document.getElementById('wl-priority').value = '10';
+    document.getElementById('wl-notes').value = '';
+    document.getElementById('wl-create-warn').style.display = 'none';
+    document.getElementById('waitlist-create-modal').style.display = 'flex';
+}
+
+async function submitWaitlistCreate() {
+    const production = document.getElementById('wl-production').value.trim();
+    const venue_id = document.getElementById('wl-venue').value;
+    const start = document.getElementById('wl-start').value;
+    const end = document.getElementById('wl-end').value;
+    const before = parseInt(document.getElementById('wl-before').value) || 0;
+    const after = parseInt(document.getElementById('wl-after').value) || 0;
+    const priority = parseInt(document.getElementById('wl-priority').value) || 10;
+    const notes = document.getElementById('wl-notes').value.trim();
+
+    if (!production || !venue_id || !start || !end) {
+        showToast('请填写必填项', 'warning');
+        return;
+    }
+    if (new Date(start) >= new Date(end)) {
+        showToast('结束时间必须晚于开始时间', 'warning');
+        return;
+    }
+
+    try {
+        await apiRequest('/waitlist', {
+            method: 'POST',
+            body: JSON.stringify({
+                production,
+                venue_id: parseInt(venue_id),
+                target_start_time: new Date(start).toISOString(),
+                target_end_time: new Date(end).toISOString(),
+                float_before_minutes: before,
+                float_after_minutes: after,
+                priority,
+                notes
+            })
+        });
+        showToast('候补登记成功');
+        closeModal('waitlist-create-modal');
+        loadWaitlist(1);
+    } catch (e) {
+        const warnEl = document.getElementById('wl-create-warn');
+        let msg = '操作失败';
+        if (typeof e.detail === 'string') msg = e.detail;
+        else if (e.detail && e.detail.message) msg = e.detail.message;
+        warnEl.innerHTML = `<h3>⚠️ ${escapeHtml(msg)}</h3><div style="font-size:12px;color:#666;">请调整时段或联系管理员</div>`;
+        warnEl.style.display = 'block';
+    }
+}
+
+async function cancelWaitlist(id) {
+    if (!confirm('确定取消此候补？')) return;
+    try {
+        await apiRequest(`/waitlist/${id}`, { method: 'DELETE' });
+        showToast('已取消候补');
+        loadWaitlist(wlPage);
+    } catch (e) { handleApiError(e); }
+}
+
+async function manualFillWaitlist(id) {
+    if (!confirm('确定手动补位此候补？系统会创建草稿预约并校验冲突。')) return;
+    try {
+        const r = await apiRequest(`/waitlist/${id}/fill`, { method: 'POST' });
+        if (r && r.success) {
+            showToast('手动补位成功，已生成草稿预约');
+        } else {
+            showToast('补位失败：' + ((r && r.message) || '时段仍冲突'), 'error');
+        }
+        loadWaitlist(wlPage);
+    } catch (e) { handleApiError(e); }
+}
+
+function exportWaitlistCSV() {
+    const token = getToken();
+    fetch(`${API_BASE}/exports/waitlist.csv`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+    })
+    .then(async response => {
+        if (!response.ok) {
+            const txt = await response.text().catch(() => '');
+            throw new Error('导出失败 ' + response.status + ' ' + txt.slice(0, 100));
+        }
+        return response.blob();
+    })
+    .then(blob => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `waitlist_${Date.now()}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        showToast('导出成功');
+    })
+    .catch(err => {
+        showToast(err.message || '导出失败', 'error');
+    });
 }
 
 async function showBookingDetail(id) {
@@ -1014,6 +1377,8 @@ function switchTab(tabName) {
 
     if (tabName === 'bookings') {
         loadBookings(1);
+    } else if (tabName === 'waitlist') {
+        loadWaitlist(1);
     } else if (tabName === 'config') {
         loadConfig();
     } else if (tabName === 'new-booking') {
@@ -1080,6 +1445,34 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('export-btn').addEventListener('click', exportCSV);
+
+    const wlSearchBtn = document.getElementById('wl-search-btn');
+    if (wlSearchBtn) {
+        wlSearchBtn.addEventListener('click', () => {
+            wlFilter.production = document.getElementById('wl-filter-production').value;
+            wlFilter.venue_id = document.getElementById('wl-filter-venue').value;
+            wlFilter.status = document.getElementById('wl-filter-status').value;
+            loadWaitlist(1);
+        });
+    }
+    const wlResetBtn = document.getElementById('wl-reset-btn');
+    if (wlResetBtn) {
+        wlResetBtn.addEventListener('click', () => {
+            document.getElementById('wl-filter-production').value = '';
+            document.getElementById('wl-filter-venue').value = '';
+            document.getElementById('wl-filter-status').value = '';
+            wlFilter = { production: '', venue_id: '', status: '' };
+            loadWaitlist(1);
+        });
+    }
+    const wlCreateBtn = document.getElementById('wl-create-btn');
+    if (wlCreateBtn) wlCreateBtn.addEventListener('click', openWaitlistCreateModal);
+
+    const wlExportBtn = document.getElementById('wl-export-btn');
+    if (wlExportBtn) wlExportBtn.addEventListener('click', exportWaitlistCSV);
+
+    const wlSubmitBtn = document.getElementById('wl-submit-btn');
+    if (wlSubmitBtn) wlSubmitBtn.addEventListener('click', submitWaitlistCreate);
 
     document.getElementById('check-conflict-btn').addEventListener('click', checkBookingConflicts);
 

@@ -732,6 +732,44 @@ body {
     }
 }
 
+.wl-status-waiting {
+    background: #fef3c7;
+    color: #92400e;
+}
+.wl-status-filled {
+    background: #c6f6d5;
+    color: #22543d;
+}
+.wl-status-cancelled {
+    background: #fed7d7;
+    color: #742a2a;
+}
+.wl-status-expired {
+    background: #e2e8f0;
+    color: #4a5568;
+}
+.wl-blocked {
+    background: #fed7aa;
+    color: #7c2d12;
+    margin-left: 6px;
+}
+.wl-status-float {
+    background: #e0e7ff;
+    color: #3730a3;
+    margin-left: 6px;
+    font-weight: 400;
+}
+.queue-badge {
+    display: inline-block;
+    background: #667eea;
+    color: white;
+    border-radius: 10px;
+    padding: 1px 8px;
+    font-size: 12px;
+    margin-left: 8px;
+    font-weight: 500;
+}
+
 @media (max-width: 768px) {
     .form-row {
         grid-template-columns: 1fr;
