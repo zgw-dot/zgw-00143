@@ -2068,20 +2068,67 @@ document.addEventListener('DOMContentLoaded', () => {
 
             let artifactsHtml = '';
             if (b.artifacts && b.artifacts.length > 0) {
+                const screenshotArtifacts = b.artifacts.filter(a => a.artifact_type === 'screenshot');
+                const summaryArtifacts = b.artifacts.filter(a => a.artifact_type === 'download_summary');
+                const logArtifacts = b.artifacts.filter(a => a.artifact_type === 'op_log');
+                const otherArtifacts = b.artifacts.filter(a => !['screenshot','download_summary','op_log'].includes(a.artifact_type));
+
                 artifactsHtml = `
                 <div class="detail-section">
                     <h3>📁 执行产物 (${b.artifacts.length})</h3>
-                    ${b.artifacts.map(a => `
-                        <div class="artifact-item ${a.artifact_type}">
-                            <div class="artifact-title">
-                                ${escapeHtml(a.title || '(无标题)')}
-                                <span class="artifact-type-label status-batch-pending">${getArtifactTypeText(a.artifact_type)}</span>
-                                <span style="font-size:11px;color:#999;margin-left:8px;">${formatDateTime(a.created_at)}</span>
+                    ${screenshotArtifacts.length > 0 ? `
+                    <div style="margin-bottom:12px;">
+                        <h4 style="font-size:13px;color:#ef4444;margin-bottom:6px;">📸 失败截图 (${screenshotArtifacts.length})</h4>
+                        ${screenshotArtifacts.map(a => `
+                            <div class="artifact-item screenshot">
+                                <div class="artifact-title">
+                                    ${escapeHtml(a.title || '(无标题)')}
+                                    <span class="artifact-type-label status-batch-failed">失败截图</span>
+                                </div>
+                                ${a.content ? `<div class="artifact-content">${escapeHtml(a.content)}</div>` : ''}
+                                ${a.file_path ? `<div style="font-size:11px;color:#888;margin-top:4px;">📁 ${escapeHtml(a.file_path)}</div>` : ''}
                             </div>
-                            ${a.content ? `<div class="artifact-content">${escapeHtml(a.content)}</div>` : ''}
-                        </div>
-                    `).join('')}
+                        `).join('')}
+                    </div>` : ''}
+                    ${summaryArtifacts.length > 0 ? `
+                    <div style="margin-bottom:12px;">
+                        <h4 style="font-size:13px;color:#8b5cf6;margin-bottom:6px;">📥 下载摘要 (${summaryArtifacts.length})</h4>
+                        ${summaryArtifacts.map(a => `
+                            <div class="artifact-item download_summary">
+                                <div class="artifact-title">${escapeHtml(a.title || '(无标题)')}</div>
+                                ${a.content ? `<div class="artifact-content">${escapeHtml(a.content)}</div>` : ''}
+                            </div>
+                        `).join('')}
+                    </div>` : ''}
+                    ${logArtifacts.length > 0 ? `
+                    <div style="margin-bottom:12px;">
+                        <h4 style="font-size:13px;color:#f59e0b;margin-bottom:6px;">📝 执行日志 (${logArtifacts.length})</h4>
+                        ${logArtifacts.map(a => `
+                            <div class="artifact-item op_log">
+                                <div class="artifact-title">${escapeHtml(a.title || '(无标题)')}</div>
+                                ${a.content ? `<div class="artifact-content">${escapeHtml(a.content)}</div>` : ''}
+                            </div>
+                        `).join('')}
+                    </div>` : ''}
+                    ${otherArtifacts.length > 0 ? `
+                    <div style="margin-bottom:12px;">
+                        <h4 style="font-size:13px;color:#0ea5e9;margin-bottom:6px;">📊 其他产物 (${otherArtifacts.length})</h4>
+                        ${otherArtifacts.map(a => `
+                            <div class="artifact-item ${a.artifact_type}">
+                                <div class="artifact-title">
+                                    ${escapeHtml(a.title || '(无标题)')}
+                                    <span class="artifact-type-label status-batch-pending">${getArtifactTypeText(a.artifact_type)}</span>
+                                </div>
+                                ${a.content ? `<div class="artifact-content">${escapeHtml(a.content)}</div>` : ''}
+                            </div>
+                        `).join('')}
+                    </div>` : ''}
                 </div>`;
+            }
+
+            let memberDownloadBtn = '';
+            if (b.status === 'completed' || b.status === 'failed') {
+                memberDownloadBtn = `<button class="btn btn-secondary" onclick="downloadMemberData('${escapeHtml(b.batch_id)}')">📥 下载摘要与日志</button>`;
             }
 
             document.getElementById('batch-detail-body').innerHTML = `
@@ -2115,12 +2162,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (b.status === 'pending') {
                     footer += `<button class="btn btn-success" onclick="executeBatch('${escapeHtml(b.batch_id)}');closeModal('batch-detail-modal');">▶ 执行</button>`;
                 }
-                if (b.status === 'failed' || b.status === 'running') {
+                if (b.status === 'failed' || b.status === 'running' || b.status === 'recovering') {
                     footer += `<button class="btn btn-warning" onclick="recoverBatch('${escapeHtml(b.batch_id)}');closeModal('batch-detail-modal');">🔄 恢复</button>`;
                 }
                 if (b.status === 'completed' || b.status === 'failed') {
                     footer += `<button class="btn btn-danger" onclick="rollbackBatch('${escapeHtml(b.batch_id)}');closeModal('batch-detail-modal');">↩️ 回滚清理</button>`;
                 }
+            }
+            if (b.status === 'completed' || b.status === 'failed') {
+                footer += `<button class="btn btn-secondary" onclick="downloadMemberData('${escapeHtml(b.batch_id)}')">📥 下载摘要与日志</button>`;
             }
             footer += '<button class="btn btn-outline modal-close-btn">关闭</button>';
             document.getElementById('batch-detail-footer').innerHTML = footer;
@@ -2206,6 +2256,29 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             showToast(result.message || (result.success ? '恢复成功' : '恢复失败'));
             loadDrillBatches();
+        } catch (e) {
+            handleApiError(e);
+        }
+    }
+
+    async function downloadMemberData(batchId) {
+        try {
+            const result = await apiRequest(`/drill-center/batches/${batchId}/member-download`);
+            if (result.downloads && result.downloads.length > 0) {
+                const content = JSON.stringify(result, null, 2);
+                const blob = new Blob([content], { type: 'application/json' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `batch_${batchId}_download.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+                showToast(`已下载 ${result.downloads.length} 项数据`);
+            } else {
+                showToast('暂无可下载的数据', 'warning');
+            }
         } catch (e) {
             handleApiError(e);
         }

@@ -4,9 +4,23 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
 
-from database import engine, Base
+from database import engine, Base, SessionLocal
 
 Base.metadata.create_all(bind=engine)
+
+try:
+    _startup_db = SessionLocal()
+    from drill_script_center import scan_and_mark_incomplete_batches
+    _recovered = scan_and_mark_incomplete_batches(_startup_db)
+    if _recovered:
+        print(f"[启动恢复] 检测到 {len(_recovered)} 个未完成批次，已标记为恢复中")
+    _startup_db.close()
+except Exception as e:
+    print(f"[启动恢复] 扫描未完成批次失败: {e}")
+    try:
+        _startup_db.close()
+    except Exception:
+        pass
 
 app = FastAPI(title="剧场排练厅预约与冲突调解系统")
 

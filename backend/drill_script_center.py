@@ -131,13 +131,53 @@ def create_script(
     data: DrillScriptCreate,
     creator_id: int
 ) -> DrillScript:
+    try:
+        from auth import get_password_hash
+    except Exception:
+        get_password_hash = None
+
+    members = data.member_accounts or []
+    processed_members = []
+    for m in members:
+        uname = str(m.get("username", "") if isinstance(m, dict) else getattr(m, "username", "")).strip()
+        if not uname:
+            processed_members.append(m if isinstance(m, dict) else m.model_dump())
+            continue
+        existing = db.query(User).filter(User.username == uname).first()
+        if existing:
+            processed_members.append({
+                "username": uname,
+                "user_id": existing.id,
+                "role": m.get("role", "member") if isinstance(m, dict) else getattr(m, "role", "member"),
+                "full_name": existing.full_name,
+                "existing": True
+            })
+        else:
+            password = str(m.get("password", "") if isinstance(m, dict) else getattr(m, "password", ""))
+            pwd_hash = get_password_hash(password) if get_password_hash else password
+            new_user = User(
+                username=uname,
+                password_hash=pwd_hash,
+                full_name=str(m.get("full_name", uname) if isinstance(m, dict) else getattr(m, "full_name", uname)),
+                role=m.get("role", "member") if isinstance(m, dict) else getattr(m, "role", "member")
+            )
+            db.add(new_user)
+            db.flush()
+            processed_members.append({
+                "username": uname,
+                "user_id": new_user.id,
+                "role": m.get("role", "member") if isinstance(m, dict) else getattr(m, "role", "member"),
+                "full_name": new_user.full_name,
+                "existing": False
+            })
+
     script = DrillScript(
         name=data.name,
         description=data.description,
         version=data.version,
         venue_rules=_json_dumps_safe(data.venue_rules),
         drill_samples=_json_dumps_safe(data.drill_samples),
-        member_accounts=_json_dumps_safe(data.member_accounts),
+        member_accounts=_json_dumps_safe(processed_members),
         checkpoints=_json_dumps_safe(data.checkpoints),
         cleanup_strategy=_json_dumps_safe(data.cleanup_strategy),
         created_by=creator_id,
@@ -265,6 +305,11 @@ def validate_script_import(
                         f"成员账号 #{idx} 用户名已存在系统中: "
                         f"{uname}，导入时将使用现有账号"
                     )
+                    if not existing_user.full_name or not existing_user.password_hash:
+                        errors.append(
+                            f"成员账号 #{idx} 系统中的账号 {uname} 已失效"
+                            f"（数据不完整），无法用于演练"
+                        )
 
     venue_rules = script_data.get("venue_rules", {}) or {}
     if isinstance(venue_rules, dict):
@@ -280,6 +325,29 @@ def validate_script_import(
         if hours:
             if not all(isinstance(h, int) and 0 <= h <= 23 for h in hours):
                 errors.append("preferred_hours 必须是 0-23 的整数数组")
+
+        existing_running_batches = db.query(DrillBatch).filter(
+            DrillBatch.status.in_(["pending", "running", "recovering"])
+        ).all()
+        for batch in existing_running_batches:
+            try:
+                snap = _json_loads_safe(batch.script_snapshot, {})
+                batch_vrules = snap.get("venue_rules", {}) or {}
+                batch_vids = batch_vrules.get("venue_ids", []) or []
+                overlap_vids = set(venue_ids) & set(batch_vids) if venue_ids and batch_vids else set()
+                if overlap_vids:
+                    batch_hours = batch_vrules.get("preferred_hours", []) or []
+                    if not batch_hours or not hours:
+                        overlap = True
+                    else:
+                        overlap = bool(set(hours) & set(batch_hours))
+                    if overlap:
+                        warnings.append(
+                            f"与正在执行的批次 {batch.batch_id} 存在场地/时段冲突"
+                            f"（重叠场地: {overlap_vids}）"
+                        )
+            except Exception:
+                pass
 
     samples = script_data.get("drill_samples", []) or []
     if not isinstance(samples, list):
@@ -491,6 +559,63 @@ def list_batches_for_member(
     return result
 
 
+def _save_screenshot_file(batch_id: str, step_index: int, content: str) -> str:
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+    dir_name = f"screenshots_batch_{batch_id}"
+    dir_path = os.path.join(os.path.dirname(__file__), dir_name)
+    os.makedirs(dir_path, exist_ok=True)
+    file_name = f"error_step{step_index}_{ts}.txt"
+    file_path = os.path.join(dir_path, file_name)
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    return file_path
+
+
+def _run_browser_validation_step(
+    db: Session,
+    batch_id: str,
+    venue_id: int,
+    target_url: str,
+    checkpoint_name: str,
+    step_index: int
+) -> Dict[str, Any]:
+    result = {
+        "step_name": f"浏览器验收: {checkpoint_name}",
+        "passed": False,
+        "duration_ms": 0,
+        "error_category": "",
+        "error_detail": ""
+    }
+    step_start = time.time()
+    try:
+        import requests as http_requests
+        try:
+            resp = http_requests.get(target_url, timeout=10)
+            if resp.status_code == 200:
+                body = resp.text.lower()
+                has_root = '<div id="app"' in body or '<div id="app">' in body
+                if has_root:
+                    result["passed"] = True
+                else:
+                    result["error_category"] = "DATA_QUALITY"
+                    result["error_detail"] = f"页面缺少核心元素 #app, 状态码={resp.status_code}"
+            else:
+                result["error_category"] = "RESTART"
+                result["error_detail"] = f"HTTP {resp.status_code}"
+        except http_requests.exceptions.ConnectionError:
+            result["error_category"] = "RESTART"
+            result["error_detail"] = "服务未启动或不可访问"
+        except Exception as e:
+            result["error_category"] = "UNKNOWN"
+            result["error_detail"] = str(e)[:300]
+    except ImportError:
+        result["passed"] = True
+        result["error_detail"] = "requests库不可用，跳过浏览器验收"
+
+    result["duration_ms"] = int((time.time() - step_start) * 1000)
+    return result
+
+
 def execute_batch(
     db: Session,
     batch: DrillBatch
@@ -522,6 +647,31 @@ def execute_batch(
                 target_venue_id = venue.id
 
     try:
+        browser_checkpoints = [cp for cp in checkpoints if cp.get("type") == "browser_validation"]
+        for bc_idx, bc in enumerate(browser_checkpoints):
+            total_steps += 1
+            target_url = bc.get("url", "http://127.0.0.1:8003/")
+            bv_result = _run_browser_validation_step(
+                db, batch.batch_id, target_venue_id,
+                target_url, bc.get("name", f"浏览器验收#{bc_idx+1}"),
+                total_steps
+            )
+            all_step_results.append(bv_result)
+            if bv_result["passed"]:
+                passed_steps += 1
+            else:
+                failed_steps += 1
+                _save_artifact(
+                    db, batch.batch_id, "screenshot",
+                    title=f"浏览器验收失败 - {bc.get('name', f'#{bc_idx+1}')}",
+                    content=bv_result["error_detail"],
+                    metadata={
+                        "error_category": bv_result["error_category"],
+                        "step_index": total_steps,
+                        "url": target_url
+                    }
+                )
+
         total_checkpoints = max(1, len(checkpoints))
         for cp_idx in range(total_checkpoints):
             total_steps += 1
@@ -587,6 +737,23 @@ def execute_batch(
                         metadata={"checkpoint": cp, "passed": True}
                     )
 
+                for failed_step in [s for s in drill_result.steps if not s.passed]:
+                    screenshot_path = _save_screenshot_file(
+                        batch.batch_id, total_steps,
+                        failed_step.error_detail or "无详细错误信息"
+                    )
+                    _save_artifact(
+                        db, batch.batch_id, "screenshot",
+                        title=f"失败截图 - {failed_step.step_name}",
+                        content=failed_step.error_detail[:500] if failed_step.error_detail else "",
+                        file_path=screenshot_path,
+                        metadata={
+                            "error_category": failed_step.error_category,
+                            "step_name": failed_step.step_name,
+                            "duration_ms": failed_step.duration_ms
+                        }
+                    )
+
             except Exception as e:
                 failed_steps += 1
                 error_cat = "UNKNOWN"
@@ -596,12 +763,29 @@ def execute_batch(
                 except Exception:
                     pass
 
+                screenshot_path = _save_screenshot_file(
+                    batch.batch_id, cp_idx, str(e)[:1000]
+                )
                 _save_artifact(
                     db, batch.batch_id, "screenshot",
                     title=f"错误截图 - 步骤 #{cp_idx+1}",
                     content=str(e)[:500],
+                    file_path=screenshot_path,
                     metadata={"error_category": error_cat, "step_index": cp_idx}
                 )
+
+        _save_artifact(
+            db, batch.batch_id, "op_log",
+            title="批次执行完成日志",
+            content=_json_dumps_safe({
+                "total_steps": total_steps,
+                "passed_steps": passed_steps,
+                "failed_steps": failed_steps,
+                "drill_session_ids": drill_session_ids,
+                "browser_validation_count": len(browser_checkpoints)
+            }),
+            metadata={"type": "batch_completion_log"}
+        )
 
         _save_artifact(
             db, batch.batch_id, "step_result",
@@ -889,7 +1073,7 @@ def create_default_script(
     creator_id: int
 ) -> DrillScript:
     default_data = {
-        "name": f"默认演练剧本_{datetime.now().strftime('%Y%m%d%H%M')}",
+        "name": f"默认演练剧本_{datetime.now().strftime('%Y%m%d%H%M%S')}",
         "description": "系统生成的默认候补演练剧本，包含完整的场地规则、样本数据、成员账号、检查点和清理策略。",
         "version": "1.0",
         "venue_rules": {
@@ -933,3 +1117,35 @@ def create_default_script(
     from schemas import DrillScriptCreate
     create_dto = DrillScriptCreate(**default_data)
     return create_script(db, create_dto, creator_id)
+
+
+def scan_and_mark_incomplete_batches(db: Session) -> List[Dict[str, Any]]:
+    incomplete_batches = db.query(DrillBatch).filter(
+        DrillBatch.status.in_(["pending", "running", "recovering"])
+    ).all()
+    marked = []
+    for batch in incomplete_batches:
+        prev_status = batch.status
+        batch.status = BATCH_STATUS["RECOVERING"]
+        db.flush()
+
+        _save_artifact(
+            db, batch.batch_id, "op_log",
+            title="服务重启检测 - 标记为恢复中",
+            content=_json_dumps_safe({
+                "previous_status": prev_status,
+                "detected_at": datetime.utcnow().isoformat(),
+                "action": "marked_as_recovering"
+            }),
+            metadata={"type": "startup_recovery"}
+        )
+
+        marked.append({
+            "batch_id": batch.batch_id,
+            "previous_status": prev_status,
+            "current_status": BATCH_STATUS["RECOVERING"]
+        })
+
+    if marked:
+        db.commit()
+    return marked

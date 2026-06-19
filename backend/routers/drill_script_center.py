@@ -207,7 +207,12 @@ def create_default_drill_script(
         return _script_to_response(script)
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"创建默认剧本失败: {str(e)}")
+        err_msg = str(e)
+        if "UNIQUE constraint" in err_msg or "已存在" in err_msg:
+            script = create_default_script(db, current_user.id)
+            db.commit()
+            return _script_to_response(script)
+        raise HTTPException(status_code=500, detail=f"创建默认剧本失败: {err_msg}")
 
 
 @router.post("/batches", response_model=DrillBatchResponse)
@@ -278,6 +283,8 @@ def get_drill_batch(
 
     data = _batch_to_response(batch)
     artifacts = list_batch_artifacts(db, batch_id)
+    if current_user.role != "admin":
+        artifacts = [a for a in artifacts if a.user_id is None or a.user_id == current_user.id]
     data["artifacts"] = [_artifact_to_response(a) for a in artifacts]
     return data
 
@@ -295,6 +302,8 @@ def execute_drill_batch(
         raise HTTPException(status_code=400, detail=f"批次当前状态为 {batch.status}，不能执行")
     if batch.status == "rolled_back":
         raise HTTPException(status_code=400, detail="批次已回滚，不能再执行")
+    if batch.status in ("completed", "failed"):
+        raise HTTPException(status_code=400, detail=f"批次已执行完成（状态: {batch.status}），不能重复执行")
 
     try:
         batch = execute_batch(db, batch)
@@ -356,6 +365,8 @@ def list_batch_drill_artifacts(
             raise HTTPException(status_code=403, detail="无权查看此批次的产物")
 
     artifacts = list_batch_artifacts(db, batch_id, artifact_type)
+    if current_user.role != "admin":
+        artifacts = [a for a in artifacts if a.user_id is None or a.user_id == current_user.id]
     return [_artifact_to_response(a) for a in artifacts]
 
 
@@ -369,3 +380,42 @@ def get_member_drill_batch_view(
     if not batch:
         raise HTTPException(status_code=404, detail="批次不存在")
     return get_member_batch_view(db, batch, current_user.id)
+
+
+@router.get("/batches/{batch_id}/member-download")
+def get_member_download(
+    batch_id: str,
+    artifact_type: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    batch = get_batch(db, batch_id)
+    if not batch:
+        raise HTTPException(status_code=404, detail="批次不存在")
+
+    if current_user.role != "admin":
+        import json as _json
+        try:
+            participant_ids = _json.loads(batch.participant_user_ids)
+        except Exception:
+            participant_ids = []
+        if current_user.id not in participant_ids and batch.created_by != current_user.id:
+            raise HTTPException(status_code=403, detail="无权下载此批次数据")
+
+    from drill_script_center import _json_loads_safe, _json_dumps_safe
+    artifacts = list_batch_artifacts(db, batch_id, artifact_type)
+    if current_user.role != "admin":
+        artifacts = [a for a in artifacts if a.user_id is None or a.user_id == current_user.id]
+
+    result = []
+    for a in artifacts:
+        if a.artifact_type in ("download_summary", "op_log", "fill_result", "step_result"):
+            result.append({
+                "id": a.id,
+                "artifact_type": a.artifact_type,
+                "title": a.title,
+                "content": a.content,
+                "created_at": a.created_at.isoformat() if a.created_at else None
+            })
+
+    return JSONResponse(content={"batch_id": batch_id, "downloads": result})
