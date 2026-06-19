@@ -147,7 +147,7 @@ def has_overlapping_closed_window(
     )
 
     if venue_id is None:
-        query = query.filter(ClosedWindow.venue_id.is_(None))
+        pass
     else:
         query = query.filter(
             (ClosedWindow.venue_id == venue_id) | (ClosedWindow.venue_id.is_(None))

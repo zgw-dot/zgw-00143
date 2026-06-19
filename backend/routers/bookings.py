@@ -124,6 +124,19 @@ def list_bookings(
     )
 
 
+@router.get("/check-conflicts")
+@router.post("/check-conflicts")
+def check_conflicts(
+    venue_id: int,
+    start_time: datetime,
+    end_time: datetime,
+    exclude_booking_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    return validate_new_booking(db, venue_id, start_time, end_time, exclude_booking_id)
+
+
 @router.get("/{booking_id}", response_model=BookingResponse)
 def get_booking(
     booking_id: int,
@@ -134,19 +147,6 @@ def get_booking(
     if not booking:
         raise HTTPException(status_code=404, detail="预约不存在")
     return booking_to_response(db, booking, include_conflicts=True)
-
-
-@router.post("/check-conflicts")
-def check_conflicts(
-    venue_id: int,
-    start_time: datetime,
-    end_time: datetime,
-    exclude_booking_id: Optional[int] = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    result = validate_new_booking(db, venue_id, start_time, end_time, exclude_booking_id)
-    return result
 
 
 @router.post("", response_model=BookingResponse)
