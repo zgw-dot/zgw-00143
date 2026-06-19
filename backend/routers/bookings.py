@@ -18,6 +18,22 @@ VALID_STATUSES = ["draft", "pending", "confirmed", "rescheduling", "cancelled"]
 FINAL_STATUSES = ["confirmed", "cancelled"]
 
 
+def raise_validation_error(validation: dict, message: str = "预约校验失败"):
+    detail = {"message": message}
+    if validation.get("conflicts"):
+        detail["conflicts"] = [c.model_dump(mode='json') for c in validation["conflicts"]]
+    if validation.get("closed_dates"):
+        detail["closed_dates"] = validation["closed_dates"]
+    if validation.get("open_slot_violations"):
+        detail["open_slot_violations"] = validation["open_slot_violations"]
+        reasons = [v["reason"] for v in validation["open_slot_violations"]]
+        detail["message"] = "；".join(reasons)
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=detail
+    )
+
+
 def booking_to_response(db: Session, booking: Booking, include_conflicts: bool = False) -> BookingResponse:
     user_name = booking.user.full_name if booking.user else None
     venue_name = booking.venue.name if booking.venue else None
@@ -139,17 +155,9 @@ def create_booking(
             detail="结束时间必须晚于开始时间"
         )
 
-    if booking.status == "pending":
-        validation = validate_new_booking(db, booking.venue_id, booking.start_time, booking.end_time)
-        if not validation["valid"]:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "message": "预约存在冲突",
-                    "conflicts": [c.model_dump(mode='json') for c in validation["conflicts"]],
-                    "closed_dates": validation["closed_dates"]
-                }
-            )
+    validation = validate_new_booking(db, booking.venue_id, booking.start_time, booking.end_time)
+    if not validation["valid"]:
+        raise_validation_error(validation, "预约存在冲突")
 
     db_booking = Booking(
         **booking.model_dump(exclude={"status"}),
@@ -216,17 +224,9 @@ def update_booking(
             detail="结束时间必须晚于开始时间"
         )
 
-    if booking.status == "pending" or booking.status == "confirmed":
-        validation = validate_new_booking(db, venue_id, start_time, end_time, exclude_booking_id=booking_id)
-        if not validation["valid"]:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "message": "预约存在冲突",
-                    "conflicts": [c.model_dump(mode='json') for c in validation["conflicts"]],
-                    "closed_dates": validation["closed_dates"]
-                }
-            )
+    validation = validate_new_booking(db, venue_id, start_time, end_time, exclude_booking_id=booking_id)
+    if not validation["valid"]:
+        raise_validation_error(validation, "预约存在冲突")
 
     update_data = booking_update.model_dump(exclude_unset=True, exclude={"version"})
     for key, value in update_data.items():
@@ -295,20 +295,21 @@ def update_booking_status(
             detail="不能替别人提交审批"
         )
 
+    if new_status == "pending":
+        validation = validate_new_booking(
+            db, booking.venue_id, booking.start_time, booking.end_time,
+            exclude_booking_id=booking_id
+        )
+        if not validation["valid"]:
+            raise_validation_error(validation, "提交前检测到冲突")
+
     if new_status == "confirmed":
         validation = validate_new_booking(
             db, booking.venue_id, booking.start_time, booking.end_time,
             exclude_booking_id=booking_id
         )
         if not validation["valid"]:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "message": "确认前检测到冲突",
-                    "conflicts": [c.model_dump(mode='json') for c in validation["conflicts"]],
-                    "closed_dates": validation["closed_dates"]
-                }
-            )
+            raise_validation_error(validation, "确认前检测到冲突")
         booking.approver_id = current_user.id
         booking.approved_at = datetime.utcnow()
 
@@ -372,14 +373,7 @@ def reschedule_booking(
         exclude_booking_id=booking_id
     )
     if not validation["valid"]:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "message": "新时段存在冲突",
-                "conflicts": [c.model_dump(mode='json') for c in validation["conflicts"]],
-                "closed_dates": validation["closed_dates"]
-            }
-        )
+        raise_validation_error(validation, "新时段存在冲突")
 
     record = RescheduleRecord(
         booking_id=booking.id,
@@ -396,7 +390,7 @@ def reschedule_booking(
     original_end = booking.end_time
     booking.start_time = reschedule.new_start_time
     booking.end_time = reschedule.new_end_time
-    booking.status = "pending"
+    booking.status = "rescheduling"
     booking.rejection_reason = ""
     booking.approver_id = None
     booking.approved_at = None

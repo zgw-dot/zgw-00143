@@ -6,7 +6,7 @@ from datetime import datetime
 import io
 import csv
 
-from database import get_db, Booking
+from database import get_db, Booking, RescheduleRecord
 from auth import get_current_user
 
 router = APIRouter()
@@ -48,7 +48,8 @@ def export_bookings_csv(
     writer.writerow([
         "预约ID", "标题", "剧目", "场地", "申请人", "状态",
         "开始时间", "结束时间", "优先级", "备注",
-        "审批人", "审批时间", "创建时间", "更新时间"
+        "审批人", "审批时间", "创建时间", "更新时间",
+        "改期序号", "原时段", "新时段", "改期原因", "改期操作人", "改期时间"
     ])
 
     status_map = {
@@ -65,7 +66,7 @@ def export_bookings_csv(
         approver_name = b.approver.full_name if b.approver else ""
         status_display = status_map.get(b.status, b.status)
 
-        writer.writerow([
+        base_row = [
             b.id,
             b.title,
             b.production,
@@ -80,7 +81,34 @@ def export_bookings_csv(
             b.approved_at.strftime("%Y-%m-%d %H:%M:%S") if b.approved_at else "",
             b.created_at.strftime("%Y-%m-%d %H:%M:%S"),
             b.updated_at.strftime("%Y-%m-%d %H:%M:%S")
-        ])
+        ]
+
+        reschedule_records = db.query(RescheduleRecord).filter(
+            RescheduleRecord.booking_id == b.id
+        ).order_by(RescheduleRecord.created_at.asc()).all()
+
+        if not reschedule_records:
+            writer.writerow(base_row + ["", "", "", "", "", ""])
+        else:
+            for idx, r in enumerate(reschedule_records, 1):
+                operator_name = r.operator.full_name if r.operator else ""
+                original_range = (
+                    f"{r.original_start_time.strftime('%Y-%m-%d %H:%M:%S')} ~ "
+                    f"{r.original_end_time.strftime('%Y-%m-%d %H:%M:%S')}"
+                )
+                new_range = (
+                    f"{r.new_start_time.strftime('%Y-%m-%d %H:%M:%S')} ~ "
+                    f"{r.new_end_time.strftime('%Y-%m-%d %H:%M:%S')}"
+                )
+                reschedule_row = [
+                    f"第{idx}次改期",
+                    original_range,
+                    new_range,
+                    r.reason or "",
+                    operator_name,
+                    r.created_at.strftime("%Y-%m-%d %H:%M:%S") if r.created_at else ""
+                ]
+                writer.writerow(base_row + reschedule_row)
 
     output.seek(0)
     content = output.getvalue()
