@@ -73,6 +73,9 @@ class ClosedWindow(Base):
     revoked_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     revoked_at = Column(DateTime, nullable=True)
 
+    is_drill = Column(Boolean, default=False)
+    drill_session_id = Column(String(100), default="")
+
     venue = relationship("Venue")
     creator = relationship("User", foreign_keys=[created_by])
     revoker = relationship("User", foreign_keys=[revoked_by])
@@ -112,6 +115,9 @@ class Booking(Base):
     approver_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     approved_at = Column(DateTime, nullable=True)
 
+    is_drill = Column(Boolean, default=False)
+    drill_session_id = Column(String(100), default="")
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -133,6 +139,10 @@ class RescheduleRecord(Base):
     new_end_time = Column(DateTime, nullable=False)
 
     reason = Column(Text, nullable=False)
+
+    is_drill = Column(Boolean, default=False)
+    drill_session_id = Column(String(100), default="")
+
     created_at = Column(DateTime, default=datetime.utcnow)
 
     booking = relationship("Booking")
@@ -178,6 +188,9 @@ class WaitlistEntry(Base):
     cancel_reason = Column(Text, default="")
 
     expires_at = Column(DateTime, nullable=True)
+
+    is_drill = Column(Boolean, default=False)
+    drill_session_id = Column(String(100), default="")
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

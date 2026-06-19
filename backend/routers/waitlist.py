@@ -51,6 +51,8 @@ def waitlist_to_response(db: Session, entry: WaitlistEntry) -> WaitlistResponse:
         cancelled_at=entry.cancelled_at,
         cancel_reason=entry.cancel_reason or "",
         expires_at=entry.expires_at,
+        is_drill=entry.is_drill or False,
+        drill_session_id=entry.drill_session_id or "",
         created_at=entry.created_at,
         updated_at=entry.updated_at
     )

@@ -575,15 +575,25 @@ async function submitWaitlistCreate() {
         loadWaitlist(1);
     } catch (e) {
         const warnEl = document.getElementById('wl-create-warn');
-        let msg = '操作失败';
-        if (typeof e.detail === 'string') {
-            msg = e.detail;
-        } else if (Array.isArray(e.detail)) {
-            msg = e.detail.map(d => d.msg || d.message || JSON.stringify(d)).join('; ');
-        } else if (e.detail && e.detail.message) {
-            msg = e.detail.message;
+        const errorInfo = handleApiError(e, '候补登记-弹层提交');
+
+        let detailHtml = '';
+        if (errorInfo.category === 'CONFLICT') {
+            detailHtml = '<div style="font-size:12px;color:#e67e22;">该时段存在冲突，请调整时间或增加浮动范围</div>';
+        } else if (errorInfo.category === 'PERMISSION') {
+            detailHtml = '<div style="font-size:12px;color:#e74c3c;">您没有权限在此场地登记候补，请联系管理员</div>';
+        } else {
+            detailHtml = `<div style="font-size:12px;color:#666;">${errorInfo.suggestion}</div>`;
         }
-        warnEl.innerHTML = `<h3>⚠️ ${escapeHtml(msg)}</h3><div style="font-size:12px;color:#666;">请调整时段或联系管理员</div>`;
+
+        const info = ERROR_CATEGORY_INFO[errorInfo.category] || ERROR_CATEGORY_INFO.UNKNOWN;
+        warnEl.innerHTML = `
+            <h3>${info.icon} ${info.label}：${escapeHtml(errorInfo.message)}</h3>
+            ${detailHtml}
+            <div style="margin-top:8px;padding:6px;background:#f8f9fa;border-radius:4px;font-size:11px;color:#999;">
+                错误分类：${errorInfo.category} | ${new Date().toLocaleString()}
+            </div>
+        `;
         warnEl.style.display = 'block';
     }
 }
@@ -594,7 +604,7 @@ async function cancelWaitlist(id) {
         await apiRequest(`/waitlist/${id}`, { method: 'DELETE' });
         showToast('已取消候补');
         loadWaitlist(wlPage);
-    } catch (e) { handleApiError(e); }
+    } catch (e) { handleApiError(e, '撤销候补-取消操作'); }
 }
 
 async function manualFillWaitlist(id) {
@@ -607,7 +617,7 @@ async function manualFillWaitlist(id) {
             showToast('补位失败：' + ((r && r.message) || '时段仍冲突'), 'error');
         }
         loadWaitlist(wlPage);
-    } catch (e) { handleApiError(e); }
+    } catch (e) { handleApiError(e, '手动补位-冲突校验'); }
 }
 
 function exportWaitlistCSV() {
@@ -618,11 +628,17 @@ function exportWaitlistCSV() {
     .then(async response => {
         if (!response.ok) {
             const txt = await response.text().catch(() => '');
-            throw new Error('导出失败 ' + response.status + ' ' + txt.slice(0, 100));
+            const error = new Error('导出失败 ' + response.status + ' ' + txt.slice(0, 100));
+            error.statusCode = response.status;
+            error.detail = txt;
+            throw error;
         }
         return response.blob();
     })
     .then(blob => {
+        if (blob.size < 50) {
+            throw new Error('CSV文件内容为空，可能是数据筛选条件不正确');
+        }
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -634,7 +650,7 @@ function exportWaitlistCSV() {
         showToast('导出成功');
     })
     .catch(err => {
-        showToast(err.message || '导出失败', 'error');
+        handleApiError({ detail: err.message, statusCode: err.statusCode }, 'CSV下载-导出验证');
     });
 }
 
@@ -973,23 +989,103 @@ async function submitReschedule() {
     }
 }
 
-function handleApiError(error) {
+const ERROR_CATEGORY_INFO = {
+    PERMISSION: { icon: '🔒', label: '权限错误', color: '#e74c3c', suggestion: '请检查您的账号权限，或联系管理员' },
+    CONFLICT: { icon: '⚔️', label: '冲突错误', color: '#e67e22', suggestion: '该时段存在资源冲突，请调整时间或联系管理员' },
+    CANCEL: { icon: '↩️', label: '撤销/取消错误', color: '#95a5a6', suggestion: '撤销或取消操作失败，请检查数据状态' },
+    MODAL: { icon: '🪟', label: '弹层错误', color: '#3498db', suggestion: '页面弹层显示异常，请刷新后重试' },
+    TABLE: { icon: '📋', label: '表格列错误', color: '#2ecc71', suggestion: '表格数据展示异常，请检查筛选条件或刷新' },
+    DOWNLOAD: { icon: '📥', label: '下载错误', color: '#9b59b6', suggestion: '文件下载失败，请检查网络或稍后重试' },
+    RESTART: { icon: '🔄', label: '重启验证错误', color: '#e74c3c', suggestion: '服务重启后数据不一致，请检查服务状态' },
+    DATA_QUALITY: { icon: '❌', label: '数据质量错误', color: '#f39c12', suggestion: '数据校验失败，请检查数据完整性' },
+    UNKNOWN: { icon: '⚠️', label: '未知错误', color: '#7f8c8d', suggestion: '发生未知错误，请联系技术支持' }
+};
+
+function classifyApiError(error) {
+    let category = 'UNKNOWN';
+    let statusCode = error.statusCode || 0;
+
+    if (typeof error.detail === 'string') {
+        const msg = error.detail.toLowerCase();
+        if (msg.includes('403') || msg.includes('forbidden') || msg.includes('权限') || msg.includes('permission')) {
+            category = 'PERMISSION';
+        } else if (msg.includes('409') || msg.includes('冲突') || msg.includes('conflict') || msg.includes('duplicate') || msg.includes('重复')) {
+            category = 'CONFLICT';
+        } else if (msg.includes('撤销') || msg.includes('取消') || msg.includes('cancel') || msg.includes('revoke')) {
+            category = 'CANCEL';
+        } else if (msg.includes('弹层') || msg.includes('modal') || msg.includes('弹窗')) {
+            category = 'MODAL';
+        } else if (msg.includes('表格') || msg.includes('列') || msg.includes('table') || msg.includes('column')) {
+            category = 'TABLE';
+        } else if (msg.includes('下载') || msg.includes('csv') || msg.includes('export')) {
+            category = 'DOWNLOAD';
+        } else if (msg.includes('重启') || msg.includes('restart')) {
+            category = 'RESTART';
+        } else if (msg.includes('数据') || msg.includes('data')) {
+            category = 'DATA_QUALITY';
+        }
+    }
+
+    if (statusCode === 403 || statusCode === 401) {
+        category = 'PERMISSION';
+    } else if (statusCode === 409) {
+        category = 'CONFLICT';
+    }
+
+    return category;
+}
+
+function handleApiError(error, context = '') {
     let message = '操作失败';
+    let detail = '';
+    let category = 'UNKNOWN';
+
     if (typeof error.detail === 'string') {
         message = error.detail;
+        detail = error.detail;
     } else if (error.detail && error.detail.message) {
         message = error.detail.message;
+        detail = error.detail.message;
         if (error.detail.conflicts && error.detail.conflicts.length > 0) {
             message += '：存在时间冲突';
+            detail += '，冲突预约：' + error.detail.conflicts.map(c => c.title || '').join(', ');
         }
         if (error.detail.closed_dates && error.detail.closed_dates.length > 0) {
             message += '：包含封场日期';
+            detail += '，封场日期：' + error.detail.closed_dates.join(', ');
         }
         if (error.detail.closed_windows && error.detail.closed_windows.length > 0) {
             message += '（撞上封场窗口）';
+            detail += '，封场窗口：' + error.detail.closed_windows.map(w => w.reason || '').join(', ');
         }
     }
-    showToast(message, 'error');
+
+    if (error.statusCode) {
+        category = classifyApiError(error);
+    } else if (context) {
+        const ctx = context.toLowerCase();
+        if (ctx.includes('权限')) category = 'PERMISSION';
+        else if (ctx.includes('冲突')) category = 'CONFLICT';
+        else if (ctx.includes('撤销') || ctx.includes('取消')) category = 'CANCEL';
+        else if (ctx.includes('弹层')) category = 'MODAL';
+        else if (ctx.includes('表格')) category = 'TABLE';
+        else if (ctx.includes('下载')) category = 'DOWNLOAD';
+        else if (ctx.includes('重启')) category = 'RESTART';
+    }
+
+    const info = ERROR_CATEGORY_INFO[category] || ERROR_CATEGORY_INFO.UNKNOWN;
+    const fullMessage = `${info.icon} ${info.label}：${message}\n💡 ${info.suggestion}`;
+
+    showToast(fullMessage, 'error');
+
+    console.error(`[API错误] 分类: ${category}, 上下文: ${context}, 详情:`, error);
+
+    return {
+        category,
+        message,
+        detail,
+        suggestion: info.suggestion
+    };
 }
 
 async function checkBookingConflicts() {

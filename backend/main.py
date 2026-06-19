@@ -36,7 +36,7 @@ def health_check():
     return {"status": "ok", "message": "剧场排练厅预约系统运行正常"}
 
 
-from routers import auth, venues, config, bookings, exports, waitlist
+from routers import auth, venues, config, bookings, exports, waitlist, waitlist_drill
 
 app.include_router(auth.router, prefix="/api/auth", tags=["认证"])
 app.include_router(venues.router, prefix="/api/venues", tags=["场地管理"])
@@ -44,6 +44,7 @@ app.include_router(config.router, prefix="/api/config", tags=["配置管理"])
 app.include_router(bookings.router, prefix="/api/bookings", tags=["预约管理"])
 app.include_router(exports.router, prefix="/api/exports", tags=["导出"])
 app.include_router(waitlist.router, prefix="/api/waitlist", tags=["候补补位"])
+app.include_router(waitlist_drill.router, prefix="/api/waitlist-drill", tags=["候补演练"])
 
 if __name__ == "__main__":
     import uvicorn

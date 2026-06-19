@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from datetime import datetime, date, time
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 
 class UserBase(BaseModel):
@@ -282,6 +282,8 @@ class WaitlistResponse(WaitlistBase):
     cancelled_at: Optional[datetime] = None
     cancel_reason: str = ""
     expires_at: Optional[datetime] = None
+    is_drill: bool = False
+    drill_session_id: str = ""
     created_at: datetime
     updated_at: datetime
 
@@ -317,3 +319,43 @@ class WaitlistFillResult(BaseModel):
     booking_id: Optional[int] = None
     status: str
     message: str = ""
+
+
+class DrillStepResult(BaseModel):
+    step_name: str
+    passed: bool
+    duration_ms: int = 0
+    error_category: str = ""
+    error_detail: str = ""
+
+
+class DrillSessionCreate(BaseModel):
+    venue_id: Optional[int] = None
+    auto_find_slot: bool = True
+    target_date_offset_days: int = 90
+
+
+class DrillSessionResponse(BaseModel):
+    drill_session_id: str
+    status: str
+    venue_id: int
+    base_date: str
+    steps: List[DrillStepResult] = []
+    total_passed: int = 0
+    total_failed: int = 0
+    cleanup_completed: bool = False
+    error_message: str = ""
+    created_at: datetime
+    completed_at: Optional[datetime] = None
+
+
+class DrillCleanupResponse(BaseModel):
+    drill_session_id: str
+    removed_count: int
+    details: Dict[str, int] = {}
+
+
+class DrillRestartVerifyRequest(BaseModel):
+    drill_session_id: str
+    server_pid: int
+    server_port: int = 8002
